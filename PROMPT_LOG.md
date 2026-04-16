@@ -662,3 +662,137 @@ apps/mobile: tsc clean (expo-router types stale → cast as never)
 - [ ] PROMPT_LOG review: thêm real prompts/outputs nếu user yêu cầu bằng chứng dense hơn
 - [ ] Day 5 zero-tap (sprint-plan §5) — toàn bộ còn nguyên
 
+---
+
+## Session #008 — 2026-04-16 — Sprint 4 hardening: live-test bugs + employee flow
+
+### Prompt gốc (chuỗi)
+
+> "Cannot read properties of undefined (reading 'length')" — dashboard
+> "sessions.map is not a function" — sessions page
+> "Branches — Day 1 stub" (còn nguyên text stub)
+> "Cannot find module './874.js'" — sau khi build rồi dev
+> "kiểm tra lại flow của employee khi đăng nhập để vào portal checkin"
+
+Tất cả đều là bug/thiếu feature lộ ra khi user chạy thật — không có cái nào catch được bằng unit test. Đây là bài học lớn nhất của session này.
+
+### 1. Bug #1 — Double data-wrap (dashboard + reports)
+
+**Symptom:** `anomalies.branches_late_spike.length` throw vì `anomalies` là `{ data: {...actual} }` thay vì `{...actual}`.
+
+**Root cause:** `ResponseTransformInterceptor` (main.ts wire) luôn wrap return value trong `{ data: ... }`. Nhưng 5 methods trong Sprint 4 services cũng tự wrap:
+- `DashboardService.getAnomalies` → `{ data: {...} }`
+- `ReportsService.getDailySummary` / `getBranchReport` / `createExport` / `getExportStatus`
+
+Interceptor wrap lần nữa → `{ data: { data: ... } }` → portal đọc `r.data` = object trong cùng, không có field cần.
+
+**Fix:** Bỏ `{ data: ... }` wrap trong service, return raw object. Interceptor làm phần wrapping. 5 places + 4 spec assertions updated.
+
+### 2. Bug #2 — Pagination shape mismatch (attendance)
+
+**Symptom:** `sessions.map is not a function` khi mở `/sessions`.
+
+**Root cause:** `ResponseTransformInterceptor.isPaginated()` detect paginated response bằng key `items` (không phải `data`):
+```ts
+'items' in value && Array.isArray(value.items) && 'meta' in value
+```
+Nhưng `attendance.service.listSessions` và `getMyAttendance` (Sprint 3) return `{ data: [...], meta }` → interceptor coi là non-paginated, wrap thêm → `{ data: { data: [...], meta } }`.
+
+BranchesService và EmployeesService đã dùng `{ items, meta }` từ Sprint 1–2 nên không bị. Đây là outlier Sprint 3.
+
+**Fix:** Rename `data` → `items` trong 3 returns của attendance.service. API contract ra wire không đổi (vẫn `{ data, meta }` sau interceptor).
+
+**Bài học chung 2 bug này:**
+- `ResponseTransformInterceptor` có contract ngầm: service return raw object HOẶC `{ items, meta }` — KHÔNG được tự wrap `{ data }`.
+- Không có doc comment trên interceptor giải thích contract → mỗi dev reinvent và sai.
+- Follow-up nên thêm JSDoc trên interceptor class + helper type `PaginatedResult<T> = { items: T[], meta: PaginationMeta }` để service import dùng đúng shape.
+
+### 3. Bug #3 — Next.js .next/ corruption
+
+**Symptom:** `Cannot find module './874.js'` khi chạy `pnpm dev`.
+
+**Root cause:** Mình chạy `pnpm build` để verify typecheck trong `/portal` (thay vì chỉ `tsc --noEmit`). Production build ghi chunks vào `.next/` với hashes khác hoàn toàn với dev chunks. Khi user restart `pnpm dev`, Next.js dev bundler reuse `.next/` nhưng chunk references mismatch → module not found.
+
+**Fix:** `rm -rf apps/portal/.next && pnpm dev`.
+
+**Bài học:** Đừng chạy `pnpm build` trên portal khi user đang dev. Dùng `npx tsc --noEmit` để verify types mà không touch `.next/`. Tương tự đã học ở Sprint 1 với api `dist/` + `tsconfig.tsbuildinfo` — cùng class bug (build artifacts từ một mode gây nhiễu mode khác).
+
+### 4. Feature gap #1 — Branches còn là Day 1 stub
+
+Day 1 ship trang `/branches` với text "Day 1 stub — sẽ hoàn thiện CRUD UI ở Day 2". Không ai làm Day 2 tiếp → stub vẫn còn nguyên tới Day 4.
+
+**Fix:** Viết đầy đủ CRUD UI portal `/branches` — list filterable + create modal + detail drawer với inline edit, WiFi whitelist add/remove (regex validation BSSID), geofence add/remove, soft-delete. Manager read-only scoped theo `BranchScopeGuard` existing.
+
+**Bài học:** Các stub "Day X" comment là technical debt không visible trong test suite. Cần sweep toàn codebase tìm `stub|TODO|Day 1` trước khi close sprint — đáng kể đó là điều mình đã miss Session #007 (chỉ check UI Sprint 4 §4.4, không check stub cũ).
+
+### 5. Feature gap #2 — Employee infinite redirect + missing check-in
+
+**Symptom:** User thử login `employee001@demo.com` → "portal không cho vào đâu cả".
+
+**Root cause:**
+1. Login success → `router.replace('/dashboard')` (hardcoded)
+2. `/dashboard` dùng `useRequireAuth('manager')` → employee không match → `router.replace('/dashboard')` (rejected users bị đẩy về `/dashboard`, mà họ đang ở `/dashboard`)
+3. **Infinite loop**
+
+Root bug thiết kế: `useRequireAuth` rejected path luôn là `/dashboard` — đúng cho admin/manager nhưng sai cho employee (không có home nào cho employee vì UI employee chưa tồn tại).
+
+**Fix:**
+1. Thêm helper `homeFor(user)` trả về `/dashboard` cho manager/admin, `/checkin` cho employee.
+2. `useRequireAuth` rejected path → `homeFor(user)` thay vì hardcode.
+3. `useRequireAuth('employee')` accept bất kỳ logged-in user (employee + manager + admin).
+4. Login `router.replace(homeFor(user))`. Home page `/` tương tự.
+5. Nav items filtered — employee chỉ thấy "Check-in".
+6. Tạo `/checkin` page mới:
+   - Today session card (status + in/out time)
+   - 2 nút lớn → `navigator.geolocation.getCurrentPosition` → POST `/attendance/check-in|out`
+   - `device_fingerprint = web-<uuid>` lưu localStorage
+   - Platform `web`, không có SSID/BSSID (browser không expose)
+   - Hiển thị trust score + validation method + risk flags
+   - Parse `error.details.distance_meters` khi INVALID_LOCATION
+   - Lịch sử 14 ngày bên dưới
+
+**Bài học:** Khi thiết kế guard/routing, luôn test cả 3 path: admin / manager / employee. Session #007 mình chỉ test admin và manager khi write `useRequireAuth`. Employee case chỉ lộ khi user thực sự login.
+
+### 6. Sai lầm và fix (Session #008)
+
+**Sai lầm 10: Chạy `pnpm build` khi portal đang dev**
+- Để verify "portal builds clean" → chạy `pnpm build` → corrupt `.next/`
+- Fix: rm -rf + restart. Lần sau dùng `npx tsc --noEmit`.
+
+**Sai lầm 11: "Sprint 4 UI done" nhưng quên role employee**
+- PR #21 claim UI done, nhưng chỉ 3 pages cho admin/manager (dashboard/sessions/reports). Employee role hoàn toàn không có entry point → vô nghĩa với 30 seeded employees.
+- Fix: PR #21 bổ sung `/checkin` + routing role-aware (chưa mở PR mới, push thẳng vào #21 vì cùng UI scope).
+- Bài học: "Completeness check" trước khi claim sprint done — phải test từng role actor được design trong spec (admin, manager, employee) chứ không chỉ happy-path admin.
+
+**Sai lầm 12: Service wrapping `{ data }` không theo contract**
+- Cùng lỗi ở 5 endpoints. Root cause: copy-paste service pattern từ 1 file sang file khác mà không check wire format.
+- Fix: bỏ wrap. Long-term: doc comment trên `ResponseTransformInterceptor`.
+- Bài học: Contract ngầm (implicit) giữa interceptor và service rất dễ drift. Viết types tường minh (ví dụ `PaginatedResult<T>`) để compiler enforce.
+
+### 7. File & commit (push thêm vào PR #21)
+
+| Commit | Scope | Files |
+|---|---|---|
+| `b5e06fe` | fix(api): double data-wrap dashboard + reports | 4 files, +53 -63 |
+| `0f05f41` | fix(attendance): rename data→items paginated | 1 file, +4 -4 |
+| `11045d1` | feat(portal): branches CRUD UI | 1 file, +862 -5 |
+| `906749a` | feat(portal): employee check-in flow + fix redirect | 5 files, +332 -10 |
+
+Tổng PR #21 giờ: 23 files changed, +2813 lines.
+
+### 8. Kết quả
+
+```
+apps/api:    118/118 tests pass (sau khi update 4 spec assertions)
+apps/portal: tsc clean; 7 routes: / /login /dashboard /sessions /reports /branches /checkin
+apps/mobile: không thay đổi
+```
+
+### 9. Follow-up
+
+- [ ] Thêm JSDoc + `PaginatedResult<T>` type trên `ResponseTransformInterceptor` để compiler enforce contract — tránh lặp bug double-wrap
+- [ ] Mobile app cũng chưa có check-in screen (chỉ có /history). Song song với `/checkin` portal, mobile cần 1 screen tương tự nhưng có WiFi SSID/BSSID (qua `expo-network` + native module).
+- [ ] Admin cần 1 nút "Toggle device is_trusted" trong UI employee detail — hiện chỉ có API, chưa UI
+- [ ] E2E test cho flow employee web check-in → history rendering — cần Testcontainers + Playwright
+
+
