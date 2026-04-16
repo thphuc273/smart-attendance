@@ -63,9 +63,9 @@ describe('DashboardService', () => {
     it('returns empty sections when manager has no branches', async () => {
       prisma.managerBranch.findMany.mockResolvedValueOnce([]);
       const result = await service.getAnomalies(userId, false);
-      expect(result.data.branches_late_spike).toEqual([]);
-      expect(result.data.employees_low_trust).toEqual([]);
-      expect(result.data.untrusted_devices_new_today).toBe(0);
+      expect(result.branches_late_spike).toEqual([]);
+      expect(result.employees_low_trust).toEqual([]);
+      expect(result.untrusted_devices_new_today).toBe(0);
     });
 
     it('flags branches with late_rate spike > 2x vs week avg', async () => {
@@ -84,11 +84,11 @@ describe('DashboardService', () => {
       prisma.attendanceSession.groupBy.mockResolvedValueOnce([]);
 
       const result = await service.getAnomalies(userId, true);
-      expect(result.data.branches_late_spike).toHaveLength(1);
-      expect(result.data.branches_late_spike[0].branch_id).toBe('branch-1');
-      expect(result.data.branches_late_spike[0].late_rate_today).toBeCloseTo(0.6, 3);
-      expect(result.data.branches_late_spike[0].late_rate_avg_7d).toBeCloseTo(0.1, 3);
-      expect(result.data.branches_late_spike[0].spike_ratio).toBe(6);
+      expect(result.branches_late_spike).toHaveLength(1);
+      expect(result.branches_late_spike[0].branch_id).toBe('branch-1');
+      expect(result.branches_late_spike[0].late_rate_today).toBeCloseTo(0.6, 3);
+      expect(result.branches_late_spike[0].late_rate_avg_7d).toBeCloseTo(0.1, 3);
+      expect(result.branches_late_spike[0].spike_ratio).toBe(6);
     });
 
     it('does not flag branches without a spike', async () => {
@@ -105,7 +105,7 @@ describe('DashboardService', () => {
       prisma.attendanceSession.groupBy.mockResolvedValueOnce([]);
 
       const result = await service.getAnomalies(userId, true);
-      expect(result.data.branches_late_spike).toHaveLength(0);
+      expect(result.branches_late_spike).toHaveLength(0);
     });
 
     it('lists employees with ≥3 low-trust sessions in 7 days', async () => {
@@ -123,8 +123,8 @@ describe('DashboardService', () => {
       ]);
 
       const result = await service.getAnomalies(userId, true);
-      expect(result.data.employees_low_trust).toHaveLength(2);
-      expect(result.data.employees_low_trust[0]).toEqual({
+      expect(result.employees_low_trust).toHaveLength(2);
+      expect(result.employees_low_trust[0]).toEqual({
         employee_id: 'emp-1',
         code: 'E001',
         low_trust_count_7d: 4,

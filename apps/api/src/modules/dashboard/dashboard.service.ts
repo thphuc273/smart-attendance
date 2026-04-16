@@ -232,11 +232,9 @@ export class DashboardService {
       scopedBranchIds = managed.map((m) => m.branchId);
       if (scopedBranchIds.length === 0) {
         return {
-          data: {
-            branches_late_spike: [],
-            employees_low_trust: [],
-            untrusted_devices_new_today: 0,
-          },
+          branches_late_spike: [],
+          employees_low_trust: [],
+          untrusted_devices_new_today: 0,
         };
       }
     }
@@ -343,11 +341,9 @@ export class DashboardService {
     });
 
     return {
-      data: {
-        branches_late_spike: branchesLateSpike,
-        employees_low_trust: employeesLowTrust,
-        untrusted_devices_new_today: untrustedDevicesNewToday,
-      },
+      branches_late_spike: branchesLateSpike,
+      employees_low_trust: employeesLowTrust,
+      untrusted_devices_new_today: untrustedDevicesNewToday,
     };
   }
 }

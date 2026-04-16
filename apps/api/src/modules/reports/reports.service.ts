@@ -92,22 +92,20 @@ export class ReportsService implements OnModuleInit {
       statusByKey.set(key, bucket);
     }
 
-    return {
-      data: rows.map((r) => {
-        const statuses = statusByKey.get(`${r.workDate.toISOString()}|${r.branchId}`) ?? {};
-        const totalWorked = r._sum.workedMinutes ?? 0;
-        return {
-          work_date: r.workDate.toISOString().slice(0, 10),
-          branch_id: r.branchId,
-          total_employees: r._count._all,
-          on_time: statuses.on_time ?? 0,
-          late: statuses.late ?? 0,
-          absent: statuses.absent ?? 0,
-          avg_worked_minutes: r._count._all ? Math.round(totalWorked / r._count._all) : 0,
-          total_overtime_minutes: r._sum.overtimeMinutes ?? 0,
-        };
-      }),
-    };
+    return rows.map((r) => {
+      const statuses = statusByKey.get(`${r.workDate.toISOString()}|${r.branchId}`) ?? {};
+      const totalWorked = r._sum.workedMinutes ?? 0;
+      return {
+        work_date: r.workDate.toISOString().slice(0, 10),
+        branch_id: r.branchId,
+        total_employees: r._count._all,
+        on_time: statuses.on_time ?? 0,
+        late: statuses.late ?? 0,
+        absent: statuses.absent ?? 0,
+        avg_worked_minutes: r._count._all ? Math.round(totalWorked / r._count._all) : 0,
+        total_overtime_minutes: r._sum.overtimeMinutes ?? 0,
+      };
+    });
   }
 
   async getBranchReport(
@@ -144,17 +142,15 @@ export class ReportsService implements OnModuleInit {
     for (const s of byStatus) statusMap[s.status] = s._count._all;
 
     return {
-      data: {
-        branch,
-        total_sessions: summary._count._all,
-        status_breakdown: statusMap,
-        total_worked_minutes: summary._sum.workedMinutes ?? 0,
-        total_overtime_minutes: summary._sum.overtimeMinutes ?? 0,
-        total_late_minutes: summary._sum.lateMinutes ?? 0,
-        avg_trust_score: summary._avg.trustScoreAvg
-          ? Math.round(summary._avg.trustScoreAvg)
-          : null,
-      },
+      branch,
+      total_sessions: summary._count._all,
+      status_breakdown: statusMap,
+      total_worked_minutes: summary._sum.workedMinutes ?? 0,
+      total_overtime_minutes: summary._sum.overtimeMinutes ?? 0,
+      total_late_minutes: summary._sum.lateMinutes ?? 0,
+      avg_trust_score: summary._avg.trustScoreAvg
+        ? Math.round(summary._avg.trustScoreAvg)
+        : null,
     };
   }
 
@@ -183,7 +179,7 @@ export class ReportsService implements OnModuleInit {
     };
     await this.exportQueue.add(JOB_REPORT_EXPORT_RUN, jobData, { jobId: record.id });
 
-    return { data: { job_id: record.id, status: record.status } };
+    return { job_id: record.id, status: record.status };
   }
 
   async getExportStatus(userId: string, isSuperAdmin: boolean, jobId: string) {
@@ -193,15 +189,13 @@ export class ReportsService implements OnModuleInit {
       throw new ForbiddenException('Not your export job');
     }
     return {
-      data: {
-        job_id: record.id,
-        status: record.status,
-        download_url:
-          record.status === 'completed' ? `/api/v1/reports/export/${record.id}/download` : null,
-        row_count: record.rowCount,
-        error_message: record.errorMessage,
-        expires_at: record.expiresAt,
-      },
+      job_id: record.id,
+      status: record.status,
+      download_url:
+        record.status === 'completed' ? `/api/v1/reports/export/${record.id}/download` : null,
+      row_count: record.rowCount,
+      error_message: record.errorMessage,
+      expires_at: record.expiresAt,
     };
   }
 
