@@ -523,3 +523,142 @@ Breakdown:
 - [ ] Chạy lệnh `docker compose up` và manual test endpoint API bằng cURL / Postman.
 - [ ] Run Cron/BullMQ cho Day 4 report & closing session.
 
+---
+
+## Session #007 — 2026-04-16 — Day 4 Sprint: Trust Score v2, BullMQ, Reports, UI
+
+### Prompt gốc
+
+> "hãy review 3 pull request hiện tại trên github, sau đó thực hiện merge nếu ok" (Sprint 3 close-out)
+>
+> Follow-up: "tham khảo tài liệu và tiếp tục sprint 4"
+> Follow-up: "ok" (xác nhận plan + các dep mới cho Sprint 4)
+> Follow-up: "review và test code của sprint 4, update lại sprint plan xem đã hoan thành như thế nào, huong dan chạy hệ thống"
+> Follow-up: "hoàn thành đầy đủ sprint 4, sau đó review và test" (sau khi user phát hiện UI chưa có)
+> Follow-up: "cập nhật vào prompt log md"
+
+### 1. Pre-sprint: merge Sprint 3 PRs
+
+- `gh pr list` → 3 PR stacked (#15, #16, #17) — tất cả targeting `develop`, `MERGEABLE`, `CLEAN`.
+- Spawn 3 Explore subagents song song review theo từng PR → all LGTM, chỉ 1 non-blocking nit (PR #17 heatmap không đọc từ `daily_attendance_summaries`).
+- Squash merge theo thứ tự #15 → #16 → #17. Sau khi #15 merged, #16/#17 cần **rebase** vì squash đã đổi hash của `a6476d3`. Dùng `git rebase origin/develop` — git tự `skipped previously applied commit` (patch-id match) → chỉ commit mới còn lại.
+- **Bài học Sprint 3→4**: Khi stack PR và dùng squash-merge, subsequent PRs sẽ conflict → lịch sử. Workflow đúng: `git fetch → git rebase origin/develop → git push --force-with-lease`. Không cần merge conflict tool.
+
+### 2. Sprint 4 plan & dep approval
+
+Đề xuất plan **3 stacked PR backend**:
+- PR A (#18) — trust-score v2 + ScheduleService (foundation)
+- PR B (#19) — BullMQ cron + `/reports/*` + CSV export
+- PR C (#20) — `/dashboard/anomalies` + heatmap refactor
+
+Hỏi user xác nhận deps (CLAUDE.md §7.2 bắt hỏi):
+- `@nestjs/bullmq`, `bullmq` — cho cron + queue
+- `csv-stringify` — CSV với UTF-8 BOM
+
+User approve với 1 chữ "ok".
+
+Sau khi user thấy UI chưa làm (login xong không có dashboard) → add **PR D (#21)** — portal + mobile UI.
+
+### 3. Quyết định kỹ thuật chính
+
+| # | Câu hỏi | Quyết định | Rationale |
+|---|---|---|---|
+| 1 | Trust score rule bổ sung thiếu 2 rule spec §5.2 | Thêm `impossibleTravel` (-30) và `vpnSuspected` (-10) inputs vào `TrustScoreInput`, giữ backward-compat bằng optional | Service chỉ cần wire thêm 2 boolean; pure function dễ test thêm |
+| 2 | Cách detect impossible travel | Query `attendanceEvent.findFirst` gần nhất có `latitude/longitude NOT NULL`, status=success, trong 6h | Không cần lưu state; event log đã có đủ. 6h đủ span cho 1 ca làm |
+| 3 | VPN detection impl | Để `vpnSuspected` luôn `false` ở service, wire input để future GeoIP module có thể inject | Hackathon: không mua GeoIP DB. Interface sẵn sàng mà không block feature |
+| 4 | Schedule classifier | Pure `common/utils/schedule.ts` (3 functions) + DB wrapper `ScheduleService` | Separation of concerns: classifier fully testable không DB; service làm DB lookup |
+| 5 | `lateMinutes` field placement | Add cột `late_minutes` trên `AttendanceSession` (chưa có) | Daily summary đã có. Per-session cũng cần cho reports detail. |
+| 6 | Cron schedule registration | `onModuleInit` trong `ReportsService`, bỏ qua nếu `NODE_ENV=test` | BullMQ repeat jobs dedup theo `jobId` — idempotent giữa restart. Test không cần Redis → skip |
+| 7 | Storage CSV output | Column `file_content TEXT` trên bảng `report_exports` | Hackathon scale (max ~150k rows × 11 cols ~= 8MB) fit DB. Không cần S3/filesystem |
+| 8 | CSV library | `csv-stringify/sync` thay vì stream API | Sync blocks event loop nhưng Worker chạy trong BullMQ, không block HTTP. Stream phức tạp, chưa cần |
+| 9 | Vietnamese UTF-8 | `{ bom: true }` trên csv-stringify | Excel Windows auto-detect BOM → hiển thị đúng dấu. Không cần Latin1 workaround |
+| 10 | Export auth ownership | Non-admin chỉ download export của chính mình | Export chứa data employee → rõ ràng scope |
+| 11 | Heatmap refactor | `$queryRaw` với `EXTRACT(HOUR FROM created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')` GROUP BY hour | Tránh loading toàn bộ events vào memory (5k/day). 1 query dùng index `(status, created_at)` |
+| 12 | Anomaly spike threshold | `late_rate_today ≥ 5%` AND `spike_ratio ≥ 2×` | Tránh false positive cho chi nhánh nhỏ. "2×" là industry norm cho spike detection |
+| 13 | Anomaly employees_low_trust | `groupBy employeeId` + `HAVING count ≥ 3` trong 7 ngày | Prisma 6 hỗ trợ `having` trong groupBy → 1 query thay vì lọc JS |
+| 14 | Portal auth layer | `localStorage` + ky `beforeRequest` hook + `afterResponse` 401 redirect | Demo simplicity. Production nên dùng httpOnly cookie |
+| 15 | Portal routing | Flat routes `/dashboard`, `/sessions`, `/reports` không group `/(authed)/` | Chỉ 3 pages — group adds indirection không worthwhile |
+| 16 | Mobile route types | Cast `'/history' as never` vì `.expo/types/router.d.ts` chưa gen | Route này chỉ gen khi `expo start` chạy. Runtime OK. Comment giải thích |
+| 17 | Dashboard tests broken từ #17 | Fix luôn trong PR #20 (thay `should be defined` stub bằng real assertions) | Tránh carrying broken tests vào Sprint 5 |
+
+### 4. Infra fixes (dev-loop bugs phát sinh khi user chạy thật)
+
+Khi user chạy `./scripts/reset-db.sh` và `pnpm dev` xuất hiện chuỗi lỗi → phải debug live:
+
+**Bug 1: `.env` rỗng → Prisma P1012 `DATABASE_URL not found`**
+- Root .env file 0 bytes (user mới tạo).
+- Fix: populate from `.env.example` + generate JWT secrets bằng `crypto.randomBytes(32).toString('hex')`.
+
+**Bug 2: `reset-db.sh` dùng `prisma migrate reset` nhưng repo không có `migrations/`**
+- Sprint 1–3 dev theo pattern "schema as source" (db push, không commit migrations).
+- Fix: đổi command thành `prisma db push --force-reset --accept-data-loss`; source root .env vào script; dùng `pg_isready` thay `sleep 3`.
+
+**Bug 3: `Cannot find module dist/main` trong watch mode**
+- `deleteOutDir: true` trong nest-cli xóa `dist/`, nhưng `tsconfig.tsbuildinfo` vẫn giữ state "up-to-date" → tsc không emit → `dist/main.js` không tồn tại.
+- Fix: set `tsBuildInfoFile: "./dist/.tsbuildinfo"` → incremental cache co-located với emit, cùng bị wipe.
+
+**Bug 4: ConfigModule không tìm `.env`**
+- `pnpm --filter @sa/api dev` có cwd là `apps/api/`, ConfigModule chỉ tìm trong cwd, không walk up tới monorepo root.
+- Fix: `envFilePath: [join(cwd(), '.env'), join(cwd(), '../../.env')]`.
+
+**Bug 5: CORS chặn LAN IP khi test từ điện thoại**
+- Portal chạy `http://192.168.1.166:3100`, ALLOWED_ORIGINS chỉ có `localhost`.
+- Fix: trong dev, regex whitelist cho `localhost|127.0.0.1|10.x|192.168.x|172.16-31.x`. Prod vẫn strict.
+
+- **Bài học**: Mỗi bug dev-loop trên chỉ phát hiện khi user chạy thật — không thể catch bằng unit test. Nhớ rằng "118/118 pass + `nest build` xanh" KHÔNG đồng nghĩa "đứng được từ fresh clone". Cần smoke test bằng lệnh `./reset-db.sh && pnpm dev` trên clean env trước khi claim sprint hoàn tất.
+
+### 5. Sai lầm và fix (Sprint 4)
+
+**Sai lầm 7: Khai báo UI là "optional, out-of-scope" rồi đóng sprint**
+- Sau PR A/B/C đã claim "Sprint 4 complete". User thử login → không thấy dashboard → hỏi "sao không thấy web admin?".
+- Phản ứng đúng lẽ ra: đọc lại sprint-plan §4.4 từ đầu; UI is IN scope of Day 4, không phải "nice-to-have".
+- Fix: scaffold PR D (portal + mobile UI) → sprint thực sự done.
+- **Bài học**: "Backend done" ≠ "Sprint done". Khi sprint-plan có checkbox UI, không được skip dù scope thoạt nhìn lớn. Hỏi user trước khi defer.
+
+**Sai lầm 8: Viết dead code trong processor**
+- Ban đầu thêm `isClosedStatus()` helper ở cuối `daily-summary.processor.ts` nhưng không dùng. Phát hiện ngay trong self-review, xóa.
+- **Bài học**: CLAUDE §8 cấm `TODO later`/dead code. Tự review từng file trước khi commit.
+
+**Sai lầm 9: Mobile `StyleSheet.create` chứa function**
+- Viết `trust: (score: number) => ({...})` — React Native `StyleSheet.create` expect static object, TS compile OK nhưng runtime style không áp được đúng.
+- Fix: extract thành `function trustColor(score)` ngoài StyleSheet, dùng `style={[styles.trustBase, trustColor(score)]}`.
+- **Bài học**: StyleSheet.create chỉ chứa literal objects. Dynamic style = spread array hoặc function ngoài.
+
+### 6. File & PR
+
+| PR | Branch | Files | Additions | Tests |
+|---|---|---|---|---|
+| #18 | `feature/trust-score-schedule` | 12 | +566 | +18 (trust-score, schedule, geo speed) |
+| #19 | `feature/reports-bullmq` | 15 | +1274 | +15 (3 processors + ReportsService scope) |
+| #20 | `feature/dashboard-manager-anomalies` | 4 | +317 | +9 (fix 2 broken + anomaly spike + heatmap bigint) |
+| #21 | `feature/sprint4-ui` | 18 | +1453 | — (manual QA) |
+
+**Tổng Sprint 4 diff vs develop**: 54 files, +3643/-157, +42 API tests.
+
+### 7. Prompts đáng học
+
+- **Plan question trước khi code**: "Đề xuất plan 3 stacked PR + dep list + migration strategy, hỏi user approve" — user đáp "ok" là clean handshake, không cần thảo luận tiếp.
+- **Sprint gate**: Đọc sprint-plan §4.X checkbox trước khi commit mỗi PR. Check lại UI checkbox trước khi close sprint (chỗ này mình miss).
+- **Subagent parallel review**: Spawn 3 Explore agents cho 3 PR cùng lúc — mỗi agent chỉ focus 1 diff, report về verdict + file:line. Hiệu quả hơn self-review serial.
+- **Debug infra khi user báo lỗi**: Đọc exact error message → map sang root cause → fix tận gốc (ví dụ tsbuildinfo + deleteOutDir race thay vì workaround "rm -rf dist mỗi lần").
+
+### 8. Prompts phải sửa
+
+- "Review 3 PR và merge nếu ok" → mình hiểu thành "merge tất cả ngay". Đúng ra nên confirm từng PR trước khi merge (destructive op chạy visible on main). Lần sau sẽ summary review rồi hỏi "OK to merge all 3?".
+- "Tiếp tục sprint 4" → ban đầu đề xuất 3 PR backend-only, không hỏi UI. Lần sau đọc kỹ §4.4 trước khi propose scope.
+
+### 9. Kết quả test & build
+
+```
+apps/api:    118/118 tests pass · tsc clean · nest build ok
+apps/portal: tsc clean · next build ok (6 routes)
+apps/mobile: tsc clean (expo-router types stale → cast as never)
+```
+
+### 10. Follow-up Day 5
+
+- [ ] Manual smoke test toàn stack sau merge (docker compose + reset-db + API + portal + mobile)
+- [ ] Merge 4 PRs theo thứ tự #18 → #19 → #20 → #21 (rebase từng PR lên develop sau khi PR trước squash)
+- [ ] PROMPT_LOG review: thêm real prompts/outputs nếu user yêu cầu bằng chứng dense hơn
+- [ ] Day 5 zero-tap (sprint-plan §5) — toàn bộ còn nguyên
+
