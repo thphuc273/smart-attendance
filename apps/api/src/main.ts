@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -13,9 +14,26 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
   app.use(helmet());
+
+  const allowed =
+    process.env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ??
+    ['http://localhost:3100', 'http://localhost:8081', 'http://localhost:19006'];
   app.enableCors({
-    origin: true,
+    origin: (origin, cb) => {
+      if (!origin || allowed.includes(origin)) return cb(null, true);
+      return cb(new Error(`Origin ${origin} not allowed`));
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
+
+  // No-store on every auth path — prevent intermediary/browser caching of tokens.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api/v1/auth/')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.setHeader('Pragma', 'no-cache');
+    }
+    next();
   });
 
   app.useGlobalPipes(
@@ -29,18 +47,21 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseTransformInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  const config = new DocumentBuilder()
-    .setTitle('Smart Attendance API')
-    .setDescription('Backend API for Smart Attendance (100 branches × 5000 employees)')
-    .setVersion('0.1.0')
-    .addBearerAuth()
-    .build();
-  const doc = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, doc);
+  // Swagger only in non-prod — reveals full DTO + auth scheme to attackers otherwise.
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Smart Attendance API')
+      .setDescription('Backend API for Smart Attendance (100 branches × 5000 employees)')
+      .setVersion('0.1.0')
+      .addBearerAuth()
+      .build();
+    const doc = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, doc);
+    Logger.log('Swagger exposed at /api/docs (non-prod)', 'Bootstrap');
+  }
 
   const port = Number(process.env.API_PORT ?? 3000);
   await app.listen(port);
   Logger.log(`API ready at http://localhost:${port}/api/v1`, 'Bootstrap');
-  Logger.log(`Swagger at http://localhost:${port}/api/docs`, 'Bootstrap');
 }
 bootstrap();
