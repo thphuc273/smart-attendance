@@ -2,9 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getStoredUser, type ApiUser } from './api';
+import { getStoredUser, isAdmin, isManager, type ApiUser } from './api';
 
-export function useRequireAuth(requiredRole?: 'admin' | 'manager'): ApiUser | null {
+export type RequiredRole = 'admin' | 'manager' | 'employee';
+
+export function homeFor(user: ApiUser): string {
+  if (isManager(user)) return '/dashboard';
+  return '/checkin';
+}
+
+export function useRequireAuth(requiredRole?: RequiredRole): ApiUser | null {
   const router = useRouter();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [ready, setReady] = useState(false);
@@ -18,10 +25,12 @@ export function useRequireAuth(requiredRole?: 'admin' | 'manager'): ApiUser | nu
     if (requiredRole) {
       const ok =
         requiredRole === 'admin'
-          ? u.roles.includes('admin')
-          : u.roles.some((r) => r === 'admin' || r === 'manager');
+          ? isAdmin(u)
+          : requiredRole === 'manager'
+            ? isManager(u)
+            : true; // 'employee' = any logged-in user
       if (!ok) {
-        router.replace('/dashboard');
+        router.replace(homeFor(u));
         return;
       }
     }

@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearAuth, getStoredUser, isAdmin, isManager, type ApiUser } from '../lib/api';
 
-const NAV_ITEMS: { href: string; label: string; role?: 'admin' | 'manager' }[] = [
+const NAV_ITEMS: { href: string; label: string; role?: 'admin' | 'manager' | 'employee' }[] = [
+  { href: '/checkin', label: 'Check-in', role: 'employee' },
   { href: '/dashboard', label: 'Dashboard', role: 'manager' },
   { href: '/sessions', label: 'Sessions', role: 'manager' },
   { href: '/reports', label: 'Reports', role: 'manager' },
@@ -29,7 +30,9 @@ export function TopNav() {
   const items = NAV_ITEMS.filter((i) => {
     if (!i.role) return true;
     if (i.role === 'admin') return isAdmin(user);
-    return isManager(user);
+    if (i.role === 'manager') return isManager(user);
+    // 'employee' — show only when user is NOT manager/admin (their landing area)
+    return !isManager(user);
   });
 
   return (

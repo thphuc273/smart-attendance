@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import ky from 'ky';
 import { storeAuth } from '../../lib/api';
+import { homeFor } from '../../lib/auth';
 
 const schema = z.object({
   email: z.string().email(),
@@ -37,7 +38,7 @@ export default function LoginPage() {
     try {
       const res = await ky.post(`${API_BASE_URL}/auth/login`, { json: form }).json<LoginResponse>();
       storeAuth(res.data.access_token, res.data.user);
-      router.replace('/dashboard');
+      router.replace(homeFor(res.data.user));
     } catch (e) {
       setError((e as Error).message);
     }

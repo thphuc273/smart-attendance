@@ -4,13 +4,15 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getStoredUser } from '../lib/api';
+import { homeFor } from '../lib/auth';
 
 export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (getStoredUser()) {
-      router.replace('/dashboard');
+    const user = getStoredUser();
+    if (user) {
+      router.replace(homeFor(user));
     }
   }, [router]);
 
