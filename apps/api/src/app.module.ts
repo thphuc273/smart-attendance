@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { PrismaModule } from './modules/prisma/prisma.module';
     }),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
     PrismaModule,
-    // AuthModule — added in feature/auth-module
+    AuthModule,
     // BranchesModule — added in feature/branches-module
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
