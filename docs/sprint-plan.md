@@ -156,7 +156,7 @@
 **Mục tiêu:** Chất lượng nghiệp vụ + báo cáo + dashboard manager.
 **DoD:** Export CSV tháng 4 cho 1 branch; cron 00:30 chạy tự động tạo summary.
 
-> **Trạng thái (2026-04-16):** Backend done — 3 stacked PRs (#18, #19, #20) mở trên `develop`. 118/118 unit tests pass, `tsc --noEmit` clean, `nest build` xanh. UI (4.4) **chưa** làm.
+> **Trạng thái (2026-04-16):** Day 4 hoàn thành — 4 stacked PRs (#18, #19, #20, #21) mở trên `develop`. Backend: 118/118 unit tests pass, `tsc --noEmit` clean, `nest build` xanh. Portal + mobile: typecheck clean, `next build` xanh.
 
 ### 4.1 Database (Prisma migration #4)
 - [x] Thêm cột `late_minutes` vào `attendance_sessions` (PR #18) — `overtime_minutes` đã có từ Day 2
@@ -183,10 +183,12 @@
 - [x] Rate limit `POST /reports/export`: 3/phút/user (PR #19, dùng `@nestjs/throttler` scope riêng)
 - [x] Manager branch-scope enforced ở mọi endpoint mới
 
-### 4.4 UI (⏳ chưa làm — backend-only Sprint 4)
-- [ ] **Portal — Manager Dashboard:** stat cards today, list low-trust sessions (click → modal override), week trend chart
-- [ ] **Portal — Reports page:** form filter → gọi export → polling status → download
-- [ ] **Mobile:** hiển thị overtime minutes + late warning trên lịch sử
+### 4.4 UI
+- [x] **Portal — Dashboard** (`/dashboard`): stat cards (employees/branches/today/on-time rate), status breakdown, top branches on-time & late, 24h heatmap, **Anomaly cards** (late spikes + low-trust employees + new untrusted devices). Admin sees overview; manager sees anomalies scoped to their branches — PR #21
+- [x] **Portal — Sessions** (`/sessions`): filterable table (status, date range) với pagination + **Override modal** (note ≥3 ký tự, ghi audit log) — PR #21
+- [x] **Portal — Reports** (`/reports`): daily summary table + form filter + **CSV export** (enqueue BullMQ → poll mỗi 1.2s → download blob) — PR #21
+- [x] **Mobile — History** (`/history`): list sessions với **late/overtime badges**, trust-score color-coded, pull-to-refresh — PR #21
+- [x] Auth layer chung: portal `useRequireAuth` + ky client với Bearer + 401 redirect; mobile `expo-secure-store` + typed env — PR #21
 
 ### 4.5 Test
 - [x] Unit: trust-score 15 test (bao gồm 2 rule mới + combined penalties) — PR #18
@@ -202,12 +204,14 @@
 - [ ] E2E: `missing-checkout` đóng session mở — deferred (cần fixtures)
 
 ### 4.6 End-of-day
-- [x] 3 PR stacked lên `develop`:
+- [x] 4 PR stacked lên `develop`:
   - [#18](https://github.com/thphuc273/smart-attendance/pull/18) `feature/trust-score-schedule` — foundation
   - [#19](https://github.com/thphuc273/smart-attendance/pull/19) `feature/reports-bullmq` — BullMQ + CSV export
   - [#20](https://github.com/thphuc273/smart-attendance/pull/20) `feature/dashboard-manager-anomalies` — anomalies + heatmap read-model
-- [x] 118/118 unit tests pass · `tsc --noEmit` clean · `nest build` xanh
-- [ ] `PROMPT_LOG.md` Session #006: prompt full trust-score, prompt BullMQ scaffold, prompt CSV export
+  - [#21](https://github.com/thphuc273/smart-attendance/pull/21) `feature/sprint4-ui` — portal dashboard/sessions/reports + mobile history + infra fixes
+- [x] 118/118 unit tests pass · api `tsc --noEmit` clean · `nest build` xanh
+- [x] Portal + mobile `tsc --noEmit` clean · `next build` xanh
+- [ ] `PROMPT_LOG.md` Session #006: prompt full trust-score, prompt BullMQ scaffold, prompt CSV export, prompt portal dashboard UI
 
 ---
 
