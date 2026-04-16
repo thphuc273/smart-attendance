@@ -483,4 +483,173 @@ export class AttendanceService {
 
   // ─── HISTORY & MANAGER ─────────────────────────────────────
 
+  async getMyAttendance(employeeUserId: string, dto: ListMyAttendanceDto) {
+    const employee = await this.prisma.employee.findUniqueOrThrow({
+      where: { userId: employeeUserId },
+    });
+
+    const where: any = { employeeId: employee.id };
+    if (dto.date_from || dto.date_to) {
+      where.workDate = {};
+      if (dto.date_from) where.workDate.gte = dto.date_from;
+      if (dto.date_to) where.workDate.lte = dto.date_to;
+    }
+
+    const [total, data] = await Promise.all([
+      this.prisma.attendanceSession.count({ where }),
+      this.prisma.attendanceSession.findMany({
+        where,
+        orderBy: { workDate: 'desc' },
+        skip: (dto.page - 1) * dto.limit,
+        take: dto.limit,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page: dto.page,
+        limit: dto.limit,
+        total_pages: Math.ceil(total / dto.limit) || 1,
+      },
+    };
+  }
+
+  async listSessions(managerUserId: string, isSuperAdmin: boolean, dto: ListSessionsDto) {
+    const where: any = {};
+
+    if (!isSuperAdmin) {
+      const managed = await this.prisma.managerBranch.findMany({
+        where: { userId: managerUserId },
+        select: { branchId: true },
+      });
+      const branchIds = managed.map((m) => m.branchId);
+      if (branchIds.length === 0) {
+        return { data: [], meta: { total: 0, page: 1, limit: dto.limit, total_pages: 1 } };
+      }
+      where.branchId = { in: branchIds };
+    }
+
+    if (dto.branch_id) where.branchId = dto.branch_id;
+    if (dto.employee_id) where.employeeId = dto.employee_id;
+    if (dto.status) where.status = dto.status;
+    if (dto.date_from || dto.date_to) {
+      where.workDate = {};
+      if (dto.date_from) where.workDate.gte = dto.date_from;
+      if (dto.date_to) where.workDate.lte = dto.date_to;
+    }
+
+    const [total, data] = await Promise.all([
+      this.prisma.attendanceSession.count({ where }),
+      this.prisma.attendanceSession.findMany({
+        where,
+        include: {
+          employee: { select: { id: true, employeeCode: true, user: { select: { fullName: true } } } },
+          branch: { select: { id: true, name: true } },
+        },
+        orderBy: { workDate: 'desc' },
+        skip: (dto.page - 1) * dto.limit,
+        take: dto.limit,
+      }),
+    ]);
+
+    // Flatten nested objects for clean output mapping
+    const mappedData = data.map(s => ({
+      ...s,
+      employee: {
+        id: s.employee.id,
+        employee_code: s.employee.employeeCode,
+        full_name: s.employee.user.fullName,
+      }
+    }));
+
+    return {
+      data: mappedData,
+      meta: {
+        total,
+        page: dto.page,
+        limit: dto.limit,
+        total_pages: Math.ceil(total / dto.limit) || 1,
+      },
+    };
+  }
+
+  async getSessionDetail(managerUserId: string, isSuperAdmin: boolean, sessionId: string) {
+    const session = await this.prisma.attendanceSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        employee: { select: { id: true, employeeCode: true, user: { select: { fullName: true } } } },
+        branch: { select: { id: true, name: true } },
+        events: { orderBy: { createdAt: 'desc' } },
+      },
+    });
+
+    if (!session) throw new NotFoundException('Session not found');
+
+    if (!isSuperAdmin) {
+      const managed = await this.prisma.managerBranch.findUnique({
+        where: { userId_branchId: { userId: managerUserId, branchId: session.branchId } },
+      });
+      if (!managed) {
+        throw new NotFoundException('Session not found or outside your scope');
+      }
+    }
+
+    return {
+      ...session,
+      employee: {
+        id: session.employee.id,
+        employee_code: session.employee.employeeCode,
+        full_name: session.employee.user.fullName,
+      }
+    };
+  }
+
+  async overrideSession(managerUserId: string, isSuperAdmin: boolean, sessionId: string, dto: OverrideSessionDto) {
+    const session = await this.prisma.attendanceSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) throw new NotFoundException('Session not found');
+
+    if (!isSuperAdmin) {
+      const managed = await this.prisma.managerBranch.findUnique({
+        where: { userId_branchId: { userId: managerUserId, branchId: session.branchId } },
+      });
+      if (!managed) {
+        throw new NotFoundException('Session not found or outside your scope');
+      }
+    }
+
+    const { status, note } = dto;
+    
+    // Create combined note
+    const appendedNote = session.note 
+      ? `${session.note}\n[${new Date().toISOString()}] Override by manager: ${note}`
+      : `[${new Date().toISOString()}] Override by manager: ${note}`;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.attendanceSession.update({
+        where: { id: sessionId },
+        data: { status, note: appendedNote },
+      });
+
+      // Audit log mandatory for override
+      await tx.auditLog.create({
+        data: {
+          userId: managerUserId,
+          action: 'update',
+          entityType: 'AttendanceSession',
+          entityId: sessionId,
+          before: { status: session.status, note: session.note },
+          after: { status, note: appendedNote },
+        },
+      });
+
+      return updated;
+    });
+
+    return result;
+  }
 }
