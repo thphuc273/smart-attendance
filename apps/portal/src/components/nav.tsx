@@ -13,6 +13,7 @@ const NAV_ITEMS: { href: string; label: string; role?: 'admin' | 'manager' | 'em
   { href: '/reports', label: 'Reports', role: 'manager' },
   { href: '/schedules', label: 'Schedules', role: 'admin' },
   { href: '/branches', label: 'Branches', role: 'admin' },
+  { href: '/audit-logs', label: 'Audit', role: 'admin' },
 ];
 
 export function TopNav() {

@@ -261,7 +261,10 @@ export default function CheckinPage() {
 
         <section className="mt-6">
           <h2 className="text-lg font-semibold">Lịch sử 14 ngày gần nhất</h2>
-          <div className="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
+
+          <HistorySummary history={history} />
+
+          <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
             {history.length === 0 ? (
               <p className="p-4 text-sm text-slate-500">Chưa có session.</p>
             ) : (
@@ -303,5 +306,41 @@ export default function CheckinPage() {
         </section>
       </main>
     </>
+  );
+}
+
+function HistorySummary({ history }: { history: Session[] }) {
+  if (history.length === 0) return null;
+
+  const onTime = history.filter((s) => s.status === 'on_time').length;
+  const late = history.filter((s) => s.status === 'late' || s.status === 'overtime').length;
+  const absent = history.filter((s) => s.status === 'absent').length;
+  const missing = history.filter((s) => s.status === 'missing_checkout').length;
+  const totalWorked = history.reduce((sum, s) => sum + (s.workedMinutes ?? 0), 0);
+  const totalOT = history.reduce((sum, s) => sum + (s.overtimeMinutes ?? 0), 0);
+  const totalLate = history.reduce((sum, s) => sum + (s.lateMinutes ?? 0), 0);
+
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-4">
+      <SummaryStat label="On-time" value={onTime} tone="green" />
+      <SummaryStat label="Late / OT" value={late} tone="amber" />
+      <SummaryStat label="Absent" value={absent} tone="red" />
+      <SummaryStat label="Missing checkout" value={missing} tone="slate" />
+      <SummaryStat label="Total worked" value={`${Math.round(totalWorked / 60)}h`} tone="slate" />
+      <SummaryStat label="Total overtime" value={`${totalOT}m`} tone="green" />
+      <SummaryStat label="Total late" value={`${totalLate}m`} tone="amber" />
+      <SummaryStat label="Days logged" value={history.length} tone="slate" />
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, tone }: { label: string; value: string | number; tone: 'green' | 'amber' | 'red' | 'slate' }) {
+  const color =
+    tone === 'green' ? 'text-green-700' : tone === 'amber' ? 'text-amber-700' : tone === 'red' ? 'text-red-700' : 'text-slate-700';
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`text-lg font-bold ${color}`}>{value}</p>
+    </div>
   );
 }
