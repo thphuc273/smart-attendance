@@ -8,6 +8,7 @@ import { Prisma, AssignmentType, EmploymentStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated } from '../../common/interceptors/response-transform.interceptor';
+import { parseDateOnly } from '../../common/utils/date-only';
 import {
   CreateEmployeeDto,
   UpdateEmployeeDto,
@@ -196,8 +197,8 @@ export class EmployeesService {
         employeeId,
         branchId: dto.branch_id,
         assignmentType: (dto.assignment_type ?? 'secondary') as AssignmentType,
-        effectiveFrom: new Date(dto.effective_from),
-        effectiveTo: dto.effective_to ? new Date(dto.effective_to) : null,
+        effectiveFrom: parseDateOnly(dto.effective_from, 'effective_from'),
+        effectiveTo: dto.effective_to ? parseDateOnly(dto.effective_to, 'effective_to') : null,
       },
     });
   }

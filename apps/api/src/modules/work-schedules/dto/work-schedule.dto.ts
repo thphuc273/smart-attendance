@@ -11,6 +11,8 @@ import {
   Max,
   Min,
 } from 'class-validator';
+
+const DATE_ONLY_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -62,11 +64,12 @@ export class AssignScheduleDto {
 
   @ApiProperty({ example: '2026-04-15' })
   @IsString()
-  @IsNotEmpty()
+  @Matches(DATE_ONLY_REGEX, { message: 'effective_from must be YYYY-MM-DD' })
   effective_from!: string;
 
   @ApiPropertyOptional({ example: '2026-06-15' })
   @IsOptional()
   @IsString()
+  @Matches(DATE_ONLY_REGEX, { message: 'effective_to must be YYYY-MM-DD' })
   effective_to?: string;
 }
