@@ -1,0 +1,44 @@
+{
+  "name": "smart-attendance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Smart Attendance — GPS/WiFi geofence attendance system with zero-tap check-in",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "api:dev": "pnpm --filter @sa/api dev",
+    "api:build": "pnpm --filter @sa/api build",
+    "api:test": "pnpm --filter @sa/api test",
+    "portal:dev": "pnpm --filter @sa/portal dev",
+    "mobile:start": "pnpm --filter @sa/mobile start",
+    "prisma:generate": "pnpm --filter @sa/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @sa/api prisma:migrate",
+    "prisma:seed": "pnpm --filter @sa/api prisma:seed",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.0",
+    "@commitlint/config-conventional": "^19.6.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "argon2",
+      "prisma",
+      "@scarf/scarf"
+    ]
+  }
+}
