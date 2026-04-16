@@ -69,6 +69,7 @@ export default function CheckinPage() {
   const [submitting, setSubmitting] = useState<'in' | 'out' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [lastResult, setLastResult] = useState<CheckInResp['data'] | null>(null);
+  const [errorDebug, setErrorDebug] = useState<unknown>(null);
 
   const loadHistory = useCallback(async () => {
     if (!user) return;
@@ -92,6 +93,7 @@ export default function CheckinPage() {
     setSubmitting(kind);
     setMessage(null);
     setLastResult(null);
+    setErrorDebug(null);
     try {
       const pos = await getGeoPosition();
       const body = {
@@ -116,27 +118,42 @@ export default function CheckinPage() {
       await loadHistory();
     } catch (e) {
       let text = (e as Error).message;
+      let debug: unknown = null;
       try {
-        // ky error body: response.json() returns the error envelope
         const err = e as { response?: Response };
         if (err.response) {
           const body = (await err.response.clone().json()) as {
-            error?: { code?: string; message?: string; details?: { trust_score?: number; risk_flags?: string[]; distance_meters?: number } };
+            error?: {
+              code?: string;
+              message?: string;
+              details?: {
+                trust_score?: number;
+                risk_flags?: string[];
+                distance_meters?: number | null;
+                hint?: string;
+                user_location?: { latitude: number; longitude: number };
+                scanned_branches?: Array<{ code: string; name: string; latitude: number; longitude: number; radius_meters: number }>;
+              };
+            };
           };
           if (body.error) {
             text = `❌ ${body.error.code}: ${body.error.message}`;
-            if (body.error.details?.distance_meters !== undefined) {
+            if (body.error.details?.hint) {
+              text += `\n💡 ${body.error.details.hint}`;
+            } else if (body.error.details?.distance_meters != null) {
               text += ` (cách geofence ${body.error.details.distance_meters}m)`;
             }
             if (body.error.details?.risk_flags?.length) {
-              text += ` · flags: ${body.error.details.risk_flags.join(', ')}`;
+              text += `\n🚩 ${body.error.details.risk_flags.join(', ')}`;
             }
+            debug = body.error.details;
           }
         }
       } catch {
         // fallback to raw message
       }
       setMessage({ kind: 'err', text });
+      setErrorDebug(debug);
     } finally {
       setSubmitting(null);
     }
@@ -208,12 +225,23 @@ export default function CheckinPage() {
             <div
               className={
                 message.kind === 'ok'
-                  ? 'mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-medium text-emerald-800'
-                  : 'mt-4 rounded-xl bg-rose-50 p-3 text-sm font-medium text-rose-700'
+                  ? 'mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-medium text-emerald-800 whitespace-pre-line'
+                  : 'mt-4 rounded-xl bg-rose-50 p-3 text-sm font-medium text-rose-700 whitespace-pre-line'
               }
             >
               {message.text}
             </div>
+          )}
+
+          {errorDebug !== null && typeof errorDebug === 'object' && errorDebug !== null && (
+            <details className="mt-2 rounded-xl bg-slate-50 p-3 text-xs">
+              <summary className="cursor-pointer font-medium text-slate-600">
+                Chi tiết debug (admin/dev)
+              </summary>
+              <pre className="mt-2 overflow-x-auto font-mono text-[10px] text-slate-700">
+                {JSON.stringify(errorDebug, null, 2)}
+              </pre>
+            </details>
           )}
 
           {lastResult && (

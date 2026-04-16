@@ -286,6 +286,26 @@ export class AttendanceService {
 
     // 11. If validation failed, throw (but event is already logged)
     if (!validationPassed) {
+      const distanceValue = Number.isFinite(closestDistance) ? Math.round(closestDistance) : null;
+      const scannedBranches = branches.map((b) => ({
+        id: b.id,
+        code: b.code,
+        name: b.name,
+        latitude: Number(b.latitude),
+        longitude: Number(b.longitude),
+        radius_meters: b.radiusMeters,
+      }));
+      let hint: string;
+      if (branches.length === 0) {
+        hint =
+          'Không tìm thấy branch active cho nhân viên này. Kiểm tra primary_branch và branch.status.';
+      } else if (distanceValue === null) {
+        hint = 'Không tính được khoảng cách — branch thiếu toạ độ hợp lệ.';
+      } else if (distanceValue > 2000) {
+        hint = `GPS của bạn cách branch gần nhất ${distanceValue}m. Branch có thể đã lưu sai toạ độ. Yêu cầu admin kiểm tra lat/lng của ${scannedBranches[0]?.name}.`;
+      } else {
+        hint = `Bạn đang cách branch ${distanceValue}m (radius ${scannedBranches[0]?.radius_meters}m). Di chuyển gần hơn hoặc tăng radius.`;
+      }
       throw new UnprocessableEntityException({
         code: 'INVALID_LOCATION',
         message: 'Vị trí ngoài geofence và WiFi không khớp',
@@ -293,7 +313,10 @@ export class AttendanceService {
           event_id: result.event.id,
           trust_score: trustResult.score,
           risk_flags: trustResult.flags,
-          distance_meters: Math.round(closestDistance),
+          distance_meters: distanceValue,
+          user_location: { latitude: dto.latitude, longitude: dto.longitude },
+          scanned_branches: scannedBranches,
+          hint,
         },
       });
     }
