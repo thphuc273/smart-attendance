@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
-import { getApi, isAdmin } from '../../lib/api';
+import { getApi, isAdmin, isManager } from '../../lib/api';
 
 interface Branch {
   id: string;
@@ -37,6 +37,7 @@ export default function EmployeesPage() {
   const [creating, setCreating] = useState(false);
 
   const admin = isAdmin(user);
+  const canEdit = isManager(user); // admin + manager both edit
 
   useEffect(() => {
     if (!user) return;
@@ -85,10 +86,10 @@ export default function EmployeesPage() {
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Employees</h1>
             <p className="mt-1 text-sm text-slate-600">
               Quản lý nhân viên, device trust, branch assignments.
-              {!admin && <span className="ml-1 text-amber-600">(manager: read-only trong scope)</span>}
+              {!admin && <span className="ml-1 text-amber-600">(manager: chỉ thao tác trên nhân viên thuộc branch bạn quản lý)</span>}
             </p>
           </div>
-          {admin && (
+          {canEdit && (
             <button
               onClick={() => setCreating(true)}
               className="btn-primary"
@@ -198,7 +199,8 @@ export default function EmployeesPage() {
         <DetailDrawer
           employee={detailOf}
           branches={branches}
-          canEdit={admin}
+          canEdit={canEdit}
+          isAdmin={admin}
           onClose={() => setDetailOf(null)}
           onMutate={() => load(meta.page)}
         />
@@ -207,6 +209,7 @@ export default function EmployeesPage() {
       {creating && (
         <CreateModal
           branches={branches}
+          isAdmin={admin}
           onClose={() => setCreating(false)}
           onSuccess={() => {
             setCreating(false);
@@ -262,12 +265,14 @@ function DetailDrawer({
   employee,
   branches,
   canEdit,
+  isAdmin,
   onClose,
   onMutate,
 }: {
   employee: Employee;
   branches: Branch[];
   canEdit: boolean;
+  isAdmin: boolean;
   onClose: () => void;
   onMutate: () => void;
 }) {
@@ -275,6 +280,26 @@ function DetailDrawer({
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingAssignment, setAddingAssignment] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteEmployee = async () => {
+    if (
+      !confirm(
+        `Terminate ${employee.user.full_name} (${employee.employee_code})? Account sẽ bị disable login, lịch sử chấm công vẫn giữ.`,
+      )
+    )
+      return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await getApi().delete(`employees/${employee.id}`);
+      onMutate();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+      setDeleting(false);
+    }
+  };
 
   const loadDevices = useCallback(async () => {
     try {
@@ -413,6 +438,21 @@ function DetailDrawer({
             </span>
           </p>
         </section>
+
+        {canEdit && employee.employment_status !== 'terminated' && (
+          <div className="mt-8 border-t border-slate-100 pt-4">
+            <button
+              onClick={deleteEmployee}
+              disabled={deleting}
+              className="text-xs font-medium text-rose-600 hover:underline disabled:opacity-50"
+            >
+              {deleting ? 'Đang xoá…' : '🗑 Terminate employee'}
+            </button>
+            <p className="mt-1 text-[10px] text-slate-400">
+              Soft-delete: status → terminated, user login disabled. Lịch sử chấm công giữ nguyên.
+            </p>
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -608,10 +648,12 @@ function AssignmentForm({
 
 function CreateModal({
   branches,
+  isAdmin,
   onClose,
   onSuccess,
 }: {
   branches: Branch[];
+  isAdmin: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -677,10 +719,11 @@ function CreateModal({
               className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.role}
               onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as 'employee' }))}
+              disabled={!isAdmin}
             >
               <option value="employee">employee</option>
-              <option value="manager">manager</option>
-              <option value="admin">admin</option>
+              {isAdmin && <option value="manager">manager</option>}
+              {isAdmin && <option value="admin">admin</option>}
             </select>
           </label>
         </div>

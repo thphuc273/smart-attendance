@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -32,32 +33,46 @@ import { ListEmployeesDto } from './dto/list-employees.dto';
 export class EmployeesController {
   constructor(private readonly employees: EmployeesService) {}
 
+  private scopeOf(user: AuthenticatedUser): string[] | undefined {
+    return user.roles.includes(RoleCode.admin) ? undefined : user.managedBranchIds;
+  }
+
   @Get()
   @Roles(RoleCode.admin, RoleCode.manager)
   list(@Query() query: ListEmployeesDto, @CurrentUser() user: AuthenticatedUser) {
-    const scope = user.roles.includes(RoleCode.admin) ? undefined : user.managedBranchIds;
-    return this.employees.list(query, scope);
+    return this.employees.list(query, this.scopeOf(user));
   }
 
   @Post()
   @HttpCode(201)
-  @Roles(RoleCode.admin)
-  create(@Body() dto: CreateEmployeeDto) {
-    return this.employees.create(dto);
+  @Roles(RoleCode.admin, RoleCode.manager)
+  create(@Body() dto: CreateEmployeeDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.employees.create(dto, this.scopeOf(user));
   }
 
   @Patch(':id')
-  @Roles(RoleCode.admin)
+  @Roles(RoleCode.admin, RoleCode.manager)
   update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateEmployeeDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.employees.update(id, dto);
+    return this.employees.update(id, dto, this.scopeOf(user));
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @Roles(RoleCode.admin, RoleCode.manager)
+  async delete(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.employees.softDelete(id, this.scopeOf(user));
   }
 
   @Post(':id/assignments')
   @HttpCode(201)
-  @Roles(RoleCode.admin)
+  @Roles(RoleCode.admin, RoleCode.manager)
   createAssignment(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: CreateAssignmentDto,

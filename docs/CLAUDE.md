@@ -125,11 +125,19 @@ Wrap qua interceptor `ResponseTransformInterceptor`.
 ### 4.6 Web portal (Next.js)
 - App Router, RSC mặc định — chỉ `'use client'` khi cần
 - Fetch data trong server components với `fetch` + `revalidate`; mutation qua route handlers
-- UI: **shadcn/ui** + **Tailwind**
-- State: **Zustand** cho client state, TanStack Query cho server state tương tác
+- UI: **Tailwind** với **design system tokens** (globals.css `@layer components`). Các class dùng xuyên suốt:
+  - `btn-primary` — gradient brand-600 → violet-600, dùng cho mọi submit/create action
+  - `btn-secondary` — outlined white, dùng cho cancel/secondary
+  - `btn-ghost` — text-only, dùng cho inline hover (logout, cancel)
+  - `input` — rounded-lg với brand focus ring
+  - `card` / `card-interactive` — rounded-2xl + shadow-card
+  - `badge` — rounded-full pill
+- Brand palette trong `tailwind.config.ts`: `brand` (indigo 50-900), `accent` (teal), `bg-brand-gradient`, `shadow-card`
+- Font: Inter qua `rsms.me/inter` CDN (globals.css import). Switch sang `next/font/google` nếu cần self-host cho demo offline
+- State: **Zustand** cho client state, TanStack Query cho server state tương tác (optional — hiện đang dùng `ky` + local `useState`)
 - Form: react-hook-form + zod (dùng chung schema với mobile)
 
-### 4.6 Testing
+### 4.7 Testing
 - Unit test cho mọi service (logic nghiệp vụ): trust score, validation, schedule
 - E2E test cho golden path: login → check-in → check-out → xem lịch sử
 - Test naming: `should <expected> when <condition>`

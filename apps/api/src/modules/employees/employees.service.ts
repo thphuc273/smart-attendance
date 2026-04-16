@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -75,7 +76,29 @@ export class EmployeesService {
     };
   }
 
-  async create(dto: CreateEmployeeDto) {
+  /**
+   * Non-admins can only touch employees whose primary branch is in their managed scope.
+   * Managers cannot create/promote admins or managers (role escalation guard).
+   */
+  private assertBranchScope(branchId: string, scopedBranchIds?: string[]) {
+    if (scopedBranchIds && !scopedBranchIds.includes(branchId)) {
+      throw new ForbiddenException({
+        code: 'BRANCH_OUT_OF_SCOPE',
+        message: 'Employee must belong to a branch you manage',
+      });
+    }
+  }
+
+  async create(dto: CreateEmployeeDto, scopedBranchIds?: string[]) {
+    this.assertBranchScope(dto.primary_branch_id, scopedBranchIds);
+    const requestedRole = dto.role ?? 'employee';
+    if (scopedBranchIds && requestedRole !== 'employee') {
+      throw new ForbiddenException({
+        code: 'ROLE_ESCALATION_BLOCKED',
+        message: 'Only admins can create manager/admin accounts',
+      });
+    }
+
     // Check unique email
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) {
@@ -151,13 +174,18 @@ export class EmployeesService {
     };
   }
 
-  async update(employeeId: string, dto: UpdateEmployeeDto) {
+  async update(employeeId: string, dto: UpdateEmployeeDto, scopedBranchIds?: string[]) {
     const emp = await this.prisma.employee.findUnique({
       where: { id: employeeId },
       include: { user: true },
     });
     if (!emp) {
       throw new NotFoundException({ code: 'RESOURCE_NOT_FOUND', message: 'Employee not found' });
+    }
+    this.assertBranchScope(emp.primaryBranchId, scopedBranchIds);
+    // Manager cannot move employee OUT of their scope
+    if (dto.primary_branch_id) {
+      this.assertBranchScope(dto.primary_branch_id, scopedBranchIds);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -234,6 +262,30 @@ export class EmployeesService {
     return this.prisma.employeeDevice.update({
       where: { id: deviceId },
       data: { isTrusted: dto.is_trusted },
+    });
+  }
+
+  /**
+   * Soft-delete: flip employment_status to 'terminated' + disable user login.
+   * Preserves historical attendance sessions. Manager can only terminate
+   * employees in their scope.
+   */
+  async softDelete(employeeId: string, scopedBranchIds?: string[]) {
+    const emp = await this.prisma.employee.findUnique({ where: { id: employeeId } });
+    if (!emp) {
+      throw new NotFoundException({ code: 'RESOURCE_NOT_FOUND', message: 'Employee not found' });
+    }
+    this.assertBranchScope(emp.primaryBranchId, scopedBranchIds);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.employee.update({
+        where: { id: employeeId },
+        data: { employmentStatus: 'terminated' },
+      });
+      await tx.user.update({
+        where: { id: emp.userId },
+        data: { status: 'inactive' },
+      });
     });
   }
 
