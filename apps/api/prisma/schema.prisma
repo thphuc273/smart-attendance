@@ -331,6 +331,7 @@ model AttendanceSession {
   checkOutAt      DateTime?               @map("check_out_at")
   workedMinutes   Int?                    @map("worked_minutes")
   overtimeMinutes Int?                    @map("overtime_minutes")
+  lateMinutes     Int?                    @map("late_minutes")
   status          AttendanceSessionStatus  @default(on_time)
   trustScore      Int?                    @map("trust_score")
   note            String?

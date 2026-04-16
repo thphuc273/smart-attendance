@@ -1,6 +1,6 @@
 /**
- * Trust Score calculator — pure function, MVP version.
- * Based on spec §5.2 scoring rules.
+ * Trust Score calculator — pure function.
+ * Based on spec §5.2 scoring rules (10 factors + auto-reject).
  *
  * Input signals → weighted score 0-100 + risk flags + validation method.
  */
@@ -23,6 +23,10 @@ export interface TrustScoreInput {
   isNewDevice: boolean;
   /** Client reports mock location flag */
   isMockLocation: boolean;
+  /** Speed from previous event exceeds physically plausible threshold */
+  impossibleTravel?: boolean;
+  /** Request IP suggests VPN / datacenter / public proxy */
+  vpnSuspected?: boolean;
 }
 
 export interface TrustScoreResult {
@@ -71,6 +75,16 @@ export function calculateTrustScore(input: TrustScoreInput): TrustScoreResult {
   if (input.accuracyMeters !== null && input.accuracyMeters > 100) {
     score -= 15;
     flags.push('accuracy_poor');
+  }
+
+  if (input.impossibleTravel) {
+    score -= 30;
+    flags.push('impossible_travel');
+  }
+
+  if (input.vpnSuspected) {
+    score -= 10;
+    flags.push('vpn_suspected');
   }
 
   // ── Determine validation method ──

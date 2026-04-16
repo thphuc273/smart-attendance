@@ -13,15 +13,54 @@ import {
   ListSessionsDto,
   OverrideSessionDto,
 } from './dto/attendance-history.dto';
-import { isInsideGeofence, distanceToGeofence, type Geofence } from '../../common/utils/geo';
+import {
+  isInsideGeofence,
+  distanceToGeofence,
+  haversineSpeedKmh,
+  type Geofence,
+} from '../../common/utils/geo';
 import { isBssidWhitelisted, isSsidMatch, type WifiConfig } from '../../common/utils/wifi';
 import { calculateTrustScore, type TrustScoreInput } from '../../common/utils/trust-score';
+import { ScheduleService } from './schedule.service';
+
+const IMPOSSIBLE_TRAVEL_KMH = 120;
+const IMPOSSIBLE_TRAVEL_LOOKBACK_MS = 6 * 60 * 60 * 1000;
 
 @Injectable()
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly scheduleService: ScheduleService,
+  ) {}
+
+  private async detectImpossibleTravel(
+    employeeId: string,
+    at: Date,
+    latitude: number,
+    longitude: number,
+  ): Promise<boolean> {
+    const prev = await this.prisma.attendanceEvent.findFirst({
+      where: {
+        employeeId,
+        status: 'success',
+        latitude: { not: null },
+        longitude: { not: null },
+        createdAt: { gte: new Date(at.getTime() - IMPOSSIBLE_TRAVEL_LOOKBACK_MS), lt: at },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { latitude: true, longitude: true, createdAt: true },
+    });
+
+    if (!prev || prev.latitude === null || prev.longitude === null) return false;
+
+    const speed = haversineSpeedKmh(
+      { latitude: Number(prev.latitude), longitude: Number(prev.longitude), at: prev.createdAt },
+      { latitude, longitude, at },
+    );
+    return speed > IMPOSSIBLE_TRAVEL_KMH;
+  }
 
   async checkIn(employeeUserId: string, dto: CheckInDto) {
     // 1. Find employee
@@ -115,7 +154,16 @@ export class AttendanceService {
     // 5. Auto-register/update device
     const device = await this.upsertDevice(employee.id, dto);
 
-    // 6. Calculate trust score
+    // 6. Impossible-travel detection vs previous successful GPS event
+    const now = new Date();
+    const impossibleTravel = await this.detectImpossibleTravel(
+      employee.id,
+      now,
+      dto.latitude,
+      dto.longitude,
+    );
+
+    // 7. Calculate trust score
     const trustInput: TrustScoreInput = {
       gpsValid,
       accuracyMeters: dto.accuracy_meters ?? null,
@@ -124,6 +172,8 @@ export class AttendanceService {
       deviceTrusted: device.isTrusted,
       isNewDevice: !device.isTrusted && device.createdAt.getTime() > Date.now() - 60_000,
       isMockLocation: dto.is_mock_location ?? false,
+      impossibleTravel,
+      vpnSuspected: false,
     };
     const trustResult = calculateTrustScore(trustInput);
 
@@ -149,26 +199,14 @@ export class AttendanceService {
       });
     }
 
-    // 9. Determine status (on_time / late)
-    const schedule = await this.prisma.workScheduleAssignment.findFirst({
-      where: {
-        employeeId: employee.id,
-        effectiveFrom: { lte: new Date() },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
-      },
-      include: { schedule: true },
-    });
-
+    // 9. Determine status (on_time / late) via schedule service
+    const schedule = await this.scheduleService.resolveSchedule(employee.id, now);
     let sessionStatus: 'on_time' | 'late' = 'on_time';
+    let lateMinutes = 0;
     if (schedule) {
-      const [startHour, startMin] = schedule.schedule.startTime.split(':').map(Number);
-      const graceMinutes = schedule.schedule.graceMinutes;
-      const now = new Date();
-      const cutoff = new Date(now);
-      cutoff.setHours(startHour, startMin + graceMinutes, 0, 0);
-      if (now > cutoff) {
-        sessionStatus = 'late';
-      }
+      const classification = this.scheduleService.classifyCheckIn(now, schedule);
+      sessionStatus = classification.status;
+      lateMinutes = classification.lateMinutes;
     }
 
     // 10. Create/update session + event in transaction
@@ -182,9 +220,10 @@ export class AttendanceService {
             employeeId: employee.id,
             branchId,
             workDate,
-            checkInAt: validationPassed ? new Date() : null,
+            checkInAt: validationPassed ? now : null,
             status: validationPassed ? sessionStatus : 'absent',
             trustScore: trustResult.score,
+            lateMinutes: validationPassed ? lateMinutes : null,
           },
         });
         sessionId = created.id;
@@ -193,9 +232,10 @@ export class AttendanceService {
         const updated = await tx.attendanceSession.update({
           where: { id: existingSession.id },
           data: {
-            checkInAt: new Date(),
+            checkInAt: now,
             status: sessionStatus,
             trustScore: trustResult.score,
+            lateMinutes,
           },
         });
         sessionId = updated.id;
@@ -338,7 +378,16 @@ export class AttendanceService {
     // 5. Device
     const device = await this.upsertDevice(employee.id, dto);
 
-    // 6. Trust score
+    // 6. Impossible-travel detection
+    const checkOutAt = new Date();
+    const impossibleTravel = await this.detectImpossibleTravel(
+      employee.id,
+      checkOutAt,
+      dto.latitude,
+      dto.longitude,
+    );
+
+    // 7. Trust score
     const trustInput: TrustScoreInput = {
       gpsValid,
       accuracyMeters: dto.accuracy_meters ?? null,
@@ -347,45 +396,40 @@ export class AttendanceService {
       deviceTrusted: device.isTrusted,
       isNewDevice: false,
       isMockLocation: dto.is_mock_location ?? false,
+      impossibleTravel,
+      vpnSuspected: false,
     };
     const trustResult = calculateTrustScore(trustInput);
     const validationPassed = gpsValid || bssidMatch || ssidOnlyMatch;
 
-    // 7. Calculate worked time
-    const checkOutAt = new Date();
-    const workedMinutes = Math.round(
-      (checkOutAt.getTime() - session.checkInAt.getTime()) / 60_000,
+    // 8. Classify via schedule service (covers worked/overtime/status)
+    const schedule = await this.scheduleService.resolveSchedule(employee.id, checkOutAt);
+    const checkInStatus: 'on_time' | 'late' = session.status === 'late' ? 'late' : 'on_time';
+    const existingLate = session.lateMinutes ?? 0;
+
+    let workedMinutes = Math.max(
+      0,
+      Math.round((checkOutAt.getTime() - session.checkInAt.getTime()) / 60_000),
     );
-
-    // Calculate overtime
-    const scheduleAssignment = await this.prisma.workScheduleAssignment.findFirst({
-      where: {
-        employeeId: employee.id,
-        effectiveFrom: { lte: new Date() },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
-      },
-      include: { schedule: true },
-    });
-
     let overtimeMinutes = 0;
     let status = session.status;
-    if (scheduleAssignment) {
-      const [endHour, endMin] = scheduleAssignment.schedule.endTime.split(':').map(Number);
-      const scheduledEnd = new Date(checkOutAt);
-      scheduledEnd.setHours(endHour, endMin, 0, 0);
+    let resolvedLateMinutes = existingLate;
 
-      const overtimeThreshold = scheduledEnd.getTime() + scheduleAssignment.schedule.overtimeAfterMinutes * 60_000;
-      if (checkOutAt.getTime() > overtimeThreshold) {
-        overtimeMinutes = Math.round((checkOutAt.getTime() - scheduledEnd.getTime()) / 60_000);
-        if (status === 'on_time') status = 'overtime';
-      }
-
-      if (checkOutAt < scheduledEnd) {
-        status = 'early_leave';
-      }
+    if (schedule) {
+      const classification = this.scheduleService.classifyCheckOut(
+        checkOutAt,
+        session.checkInAt,
+        schedule,
+        checkInStatus,
+        existingLate,
+      );
+      workedMinutes = classification.workedMinutes;
+      overtimeMinutes = classification.overtimeMinutes;
+      status = classification.status as typeof status;
+      resolvedLateMinutes = classification.lateMinutes;
     }
 
-    // 8. Update session + create event
+    // 9. Update session + create event
     const result = await this.prisma.$transaction(async (tx) => {
       const updatedSession = await tx.attendanceSession.update({
         where: { id: session.id },
@@ -393,6 +437,7 @@ export class AttendanceService {
           checkOutAt,
           workedMinutes,
           overtimeMinutes,
+          lateMinutes: resolvedLateMinutes,
           status,
           trustScore: Math.min(session.trustScore ?? 100, trustResult.score),
         },
