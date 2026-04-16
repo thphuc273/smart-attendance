@@ -735,13 +735,38 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     code: '',
     name: '',
     address: '',
-    latitude: 10.7769,
-    longitude: 106.7009,
+    latitude: '' as number | '',
+    longitude: '' as number | '',
     radius_meters: 150,
     timezone: 'Asia/Ho_Chi_Minh',
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setError('Trình duyệt không hỗ trợ Geolocation');
+      return;
+    }
+    setGeoLoading(true);
+    setError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setForm((f) => ({
+          ...f,
+          latitude: Number(pos.coords.latitude.toFixed(6)),
+          longitude: Number(pos.coords.longitude.toFixed(6)),
+        }));
+        setGeoLoading(false);
+      },
+      (err) => {
+        setError(`Không lấy được vị trí: ${err.message}`);
+        setGeoLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15_000 },
+    );
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -806,29 +831,54 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           />
         </label>
 
-        <div className="flex gap-2">
-          <label className="block flex-1 text-sm">
-            <span className="text-slate-600">Latitude</span>
-            <input
-              type="number"
-              step="any"
-              required
-              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              value={form.latitude}
-              onChange={(e) => setForm((f) => ({ ...f, latitude: Number(e.target.value) }))}
-            />
-          </label>
-          <label className="block flex-1 text-sm">
-            <span className="text-slate-600">Longitude</span>
-            <input
-              type="number"
-              step="any"
-              required
-              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              value={form.longitude}
-              onChange={(e) => setForm((f) => ({ ...f, longitude: Number(e.target.value) }))}
-            />
-          </label>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-sm text-slate-600">Toạ độ chi nhánh</span>
+            <button
+              type="button"
+              onClick={useCurrentLocation}
+              disabled={geoLoading}
+              className="rounded-md bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100 disabled:opacity-50"
+            >
+              {geoLoading ? 'Đang lấy…' : '📍 Dùng vị trí hiện tại'}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <label className="block flex-1 text-sm">
+              <span className="text-[11px] text-slate-500">Latitude</span>
+              <input
+                type="number"
+                step="any"
+                required
+                placeholder="10.776900"
+                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                value={form.latitude}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    latitude: e.target.value === '' ? '' : Number(e.target.value),
+                  }))
+                }
+              />
+            </label>
+            <label className="block flex-1 text-sm">
+              <span className="text-[11px] text-slate-500">Longitude</span>
+              <input
+                type="number"
+                step="any"
+                required
+                placeholder="106.700900"
+                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                value={form.longitude}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    longitude: e.target.value === '' ? '' : Number(e.target.value),
+                  }))
+                }
+              />
+            </label>
+          </div>
         </div>
 
         <label className="block text-sm">

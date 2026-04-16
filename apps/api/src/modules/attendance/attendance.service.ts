@@ -109,13 +109,22 @@ export class AttendanceService {
     const point = { latitude: dto.latitude, longitude: dto.longitude };
 
     for (const branch of branches) {
-      // Check geofences
-      for (const geo of branch.geofences) {
-        const geofence: Geofence = {
-          centerLat: Number(geo.centerLat),
-          centerLng: Number(geo.centerLng),
-          radiusMeters: geo.radiusMeters,
-        };
+      // Branch.lat/lng/radiusMeters acts as the default/implicit geofence.
+      // BranchGeofence rows are ADDITIONAL (e.g. multi-entrance buildings).
+      const branchGeofences: Geofence[] = [
+        {
+          centerLat: Number(branch.latitude),
+          centerLng: Number(branch.longitude),
+          radiusMeters: branch.radiusMeters,
+        },
+        ...branch.geofences.map((g) => ({
+          centerLat: Number(g.centerLat),
+          centerLng: Number(g.centerLng),
+          radiusMeters: g.radiusMeters,
+        })),
+      ];
+
+      for (const geofence of branchGeofences) {
         if (isInsideGeofence(point, geofence)) {
           gpsValid = true;
           matchedBranch = branch;
@@ -127,6 +136,8 @@ export class AttendanceService {
           if (!matchedBranch) matchedBranch = branch;
         }
       }
+
+      if (gpsValid) continue; // already matched this branch by GPS
 
       // Check WiFi
       const wifiConfigs: WifiConfig[] = branch.wifiConfigs.map((w) => ({
@@ -354,12 +365,20 @@ export class AttendanceService {
     const point = { latitude: dto.latitude, longitude: dto.longitude };
 
     if (branch) {
-      for (const geo of branch.geofences) {
-        const geofence: Geofence = {
-          centerLat: Number(geo.centerLat),
-          centerLng: Number(geo.centerLng),
-          radiusMeters: geo.radiusMeters,
-        };
+      // Branch.lat/lng acts as default geofence + any BranchGeofence rows as additional.
+      const branchGeofences: Geofence[] = [
+        {
+          centerLat: Number(branch.latitude),
+          centerLng: Number(branch.longitude),
+          radiusMeters: branch.radiusMeters,
+        },
+        ...branch.geofences.map((g) => ({
+          centerLat: Number(g.centerLat),
+          centerLng: Number(g.centerLng),
+          radiusMeters: g.radiusMeters,
+        })),
+      ];
+      for (const geofence of branchGeofences) {
         if (isInsideGeofence(point, geofence)) {
           gpsValid = true;
           break;
