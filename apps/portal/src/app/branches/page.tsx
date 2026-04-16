@@ -1,10 +1,867 @@
-export const dynamic = 'force-dynamic';
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { TopNav } from '../../components/nav';
+import { useRequireAuth } from '../../lib/auth';
+import { getApi, isAdmin } from '../../lib/api';
+
+interface Branch {
+  id: string;
+  code: string;
+  name: string;
+  address: string | null;
+  latitude: string | number;
+  longitude: string | number;
+  radiusMeters: number;
+  timezone: string;
+  status: 'active' | 'inactive' | 'closed';
+}
+
+interface ListResp {
+  data: Branch[];
+  meta: { total: number; page: number; limit: number; total_pages: number };
+}
 
 export default function BranchesPage() {
+  const user = useRequireAuth('manager');
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [meta, setMeta] = useState<ListResp['meta']>({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [detailOf, setDetailOf] = useState<Branch | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const admin = isAdmin(user);
+
+  const load = useCallback(
+    async (page: number) => {
+      if (!user) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const api = getApi();
+        const params = new URLSearchParams({ page: String(page), limit: '20' });
+        if (search) params.set('search', search);
+        if (statusFilter) params.set('status', statusFilter);
+        const resp = await api.get(`branches?${params}`).json<ListResp>();
+        setBranches(resp.data);
+        setMeta(resp.meta);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [search, statusFilter, user],
+  );
+
+  useEffect(() => {
+    if (user) load(1);
+  }, [user, load]);
+
+  if (!user) return null;
+
   return (
-    <main className="mx-auto max-w-5xl p-8">
-      <h1 className="text-2xl font-bold">Branches</h1>
-      <p className="mt-2 text-slate-600">Day 1 stub — sẽ hoàn thiện CRUD UI ở Day 2.</p>
-    </main>
+    <>
+      <TopNav />
+      <main className="mx-auto max-w-6xl p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Branches</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Quản lý chi nhánh, WiFi whitelist và geofence.{' '}
+              {!admin && <span className="text-amber-600">(manager: chỉ xem scope của mình)</span>}
+            </p>
+          </div>
+          {admin && (
+            <button
+              onClick={() => setCreating(true)}
+              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+            >
+              + New branch
+            </button>
+          )}
+        </div>
+
+        <form
+          className="mt-4 flex flex-wrap items-end gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            load(1);
+          }}
+        >
+          <label className="text-sm">
+            <span className="text-slate-600">Search (code/name)</span>
+            <input
+              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="HCM-Q1"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="text-slate-600">Status</span>
+            <select
+              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="">(tất cả)</option>
+              <option value="active">active</option>
+              <option value="inactive">inactive</option>
+              <option value="closed">closed</option>
+            </select>
+          </label>
+          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+            Apply
+          </button>
+        </form>
+
+        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+
+        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2">Code</th>
+                <th className="px-3 py-2">Name</th>
+                <th className="px-3 py-2">Address</th>
+                <th className="px-3 py-2">Location</th>
+                <th className="px-3 py-2">Radius</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                    Đang tải…
+                  </td>
+                </tr>
+              )}
+              {!loading && branches.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                    Không có chi nhánh phù hợp
+                  </td>
+                </tr>
+              )}
+              {branches.map((b) => (
+                <tr key={b.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <td className="px-3 py-2 font-mono text-xs">{b.code}</td>
+                  <td className="px-3 py-2 font-medium">{b.name}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{b.address ?? '—'}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-500">
+                    {Number(b.latitude).toFixed(4)}, {Number(b.longitude).toFixed(4)}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs">{b.radiusMeters}m</td>
+                  <td className="px-3 py-2">
+                    <StatusBadge status={b.status} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      onClick={() => setDetailOf(b)}
+                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                    >
+                      Detail
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <Pagination meta={meta} onChange={load} />
+      </main>
+
+      {detailOf && (
+        <DetailDrawer
+          branch={detailOf}
+          canEdit={admin}
+          onClose={() => setDetailOf(null)}
+          onMutate={() => load(meta.page)}
+        />
+      )}
+
+      {creating && (
+        <CreateModal
+          onClose={() => setCreating(false)}
+          onSuccess={() => {
+            setCreating(false);
+            load(1);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const tone =
+    status === 'active'
+      ? 'bg-green-100 text-green-700'
+      : status === 'inactive'
+        ? 'bg-slate-100 text-slate-700'
+        : 'bg-red-100 text-red-700';
+  return <span className={`rounded px-2 py-0.5 text-xs ${tone}`}>{status}</span>;
+}
+
+function Pagination({ meta, onChange }: { meta: ListResp['meta']; onChange: (p: number) => void }) {
+  return (
+    <div className="mt-3 flex items-center justify-between text-xs text-slate-600">
+      <span>
+        {meta.total} branches · page {meta.page}/{meta.total_pages}
+      </span>
+      <div className="flex gap-2">
+        <button
+          disabled={meta.page <= 1}
+          onClick={() => onChange(meta.page - 1)}
+          className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
+        >
+          ← Prev
+        </button>
+        <button
+          disabled={meta.page >= meta.total_pages}
+          onClick={() => onChange(meta.page + 1)}
+          className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface WifiConfig {
+  id: string;
+  ssid: string;
+  bssid: string | null;
+  priority: number;
+  isActive: boolean;
+  notes?: string | null;
+}
+
+interface Geofence {
+  id: string;
+  name: string;
+  centerLat: string | number;
+  centerLng: string | number;
+  radiusMeters: number;
+  isActive: boolean;
+}
+
+interface BranchDetail extends Branch {
+  wifiConfigs: WifiConfig[];
+  geofences: Geofence[];
+}
+
+function DetailDrawer({
+  branch,
+  canEdit,
+  onClose,
+  onMutate,
+}: {
+  branch: Branch;
+  canEdit: boolean;
+  onClose: () => void;
+  onMutate: () => void;
+}) {
+  const [detail, setDetail] = useState<BranchDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  const loadDetail = useCallback(async () => {
+    setError(null);
+    try {
+      const api = getApi();
+      const r = await api.get(`branches/${branch.id}`).json<{ data: BranchDetail }>();
+      setDetail(r.data);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [branch.id]);
+
+  useEffect(() => {
+    loadDetail();
+  }, [loadDetail]);
+
+  const deleteBranch = async () => {
+    if (!confirm(`Xoá branch ${branch.code}? (soft delete)`)) return;
+    try {
+      await getApi().delete(`branches/${branch.id}`);
+      onMutate();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <aside
+        className="h-full w-full max-w-lg overflow-y-auto bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs font-mono text-slate-500">{branch.code}</p>
+            <h2 className="text-xl font-bold">{branch.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-sm text-slate-500">
+            ✕
+          </button>
+        </div>
+
+        {error && <p className="mt-3 rounded bg-red-50 p-2 text-sm text-red-600">{error}</p>}
+
+        {!detail ? (
+          <p className="mt-4 text-sm text-slate-500">Đang tải…</p>
+        ) : (
+          <>
+            <section className="mt-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Info</h3>
+                {canEdit && (
+                  <button
+                    onClick={() => setEditing((v) => !v)}
+                    className="text-xs text-slate-600 hover:underline"
+                  >
+                    {editing ? 'Cancel' : 'Edit'}
+                  </button>
+                )}
+              </div>
+              {editing ? (
+                <EditForm
+                  branch={detail}
+                  onSuccess={() => {
+                    setEditing(false);
+                    loadDetail();
+                    onMutate();
+                  }}
+                />
+              ) : (
+                <dl className="mt-2 space-y-1 text-sm">
+                  <Row label="Address" value={detail.address ?? '—'} />
+                  <Row
+                    label="Location"
+                    value={`${Number(detail.latitude).toFixed(6)}, ${Number(detail.longitude).toFixed(6)}`}
+                  />
+                  <Row label="Radius" value={`${detail.radiusMeters} m`} />
+                  <Row label="Timezone" value={detail.timezone} />
+                  <Row label="Status" value={detail.status} />
+                </dl>
+              )}
+            </section>
+
+            <WifiSection
+              branchId={branch.id}
+              configs={detail.wifiConfigs}
+              canEdit={canEdit}
+              onChange={loadDetail}
+            />
+
+            <GeofenceSection
+              branchId={branch.id}
+              geofences={detail.geofences}
+              canEdit={canEdit}
+              onChange={loadDetail}
+            />
+
+            {canEdit && (
+              <div className="mt-8 border-t border-slate-200 pt-4">
+                <button
+                  onClick={deleteBranch}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Soft-delete this branch
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between border-b border-slate-100 py-1 last:border-0">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="font-mono text-xs">{value}</dd>
+    </div>
+  );
+}
+
+function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () => void }) {
+  const [form, setForm] = useState({
+    name: branch.name,
+    address: branch.address ?? '',
+    radius_meters: branch.radiusMeters,
+    status: branch.status,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await getApi().patch(`branches/${branch.id}`, {
+        json: {
+          name: form.name,
+          address: form.address || undefined,
+          radius_meters: Number(form.radius_meters),
+          status: form.status,
+        },
+      });
+      onSuccess();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-2 space-y-2 text-sm">
+      <label className="block">
+        <span className="text-slate-600">Name</span>
+        <input
+          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="text-slate-600">Address</span>
+        <input
+          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          value={form.address}
+          onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="text-slate-600">Radius (10–5000m)</span>
+        <input
+          type="number"
+          min={10}
+          max={5000}
+          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          value={form.radius_meters}
+          onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
+        />
+      </label>
+      <label className="block">
+        <span className="text-slate-600">Status</span>
+        <select
+          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          value={form.status}
+          onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Branch['status'] }))}
+        >
+          <option value="active">active</option>
+          <option value="inactive">inactive</option>
+          <option value="closed">closed</option>
+        </select>
+      </label>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <button
+        type="submit"
+        disabled={submitting}
+        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+      >
+        {submitting ? 'Saving…' : 'Save'}
+      </button>
+    </form>
+  );
+}
+
+function WifiSection({
+  branchId,
+  configs,
+  canEdit,
+  onChange,
+}: {
+  branchId: string;
+  configs: WifiConfig[];
+  canEdit: boolean;
+  onChange: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ ssid: '', bssid: '', priority: 10, notes: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await getApi().post(`branches/${branchId}/wifi-configs`, {
+        json: {
+          ssid: form.ssid,
+          bssid: form.bssid || undefined,
+          priority: Number(form.priority),
+          notes: form.notes || undefined,
+        },
+      });
+      setForm({ ssid: '', bssid: '', priority: 10, notes: '' });
+      setAdding(false);
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('Xoá WiFi config này?')) return;
+    try {
+      await getApi().delete(`branches/${branchId}/wifi-configs/${id}`);
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <section className="mt-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">WiFi whitelist ({configs.length})</h3>
+        {canEdit && (
+          <button onClick={() => setAdding((v) => !v)} className="text-xs text-slate-600 hover:underline">
+            {adding ? 'Cancel' : '+ Add'}
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
+          <input
+            className="block w-full rounded border border-slate-300 px-2 py-1"
+            placeholder="SSID (ví dụ: Office-5G)"
+            value={form.ssid}
+            onChange={(e) => setForm((f) => ({ ...f, ssid: e.target.value }))}
+          />
+          <input
+            className="block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            placeholder="BSSID aa:bb:cc:dd:ee:ff (optional)"
+            value={form.bssid}
+            onChange={(e) => setForm((f) => ({ ...f, bssid: e.target.value }))}
+          />
+          <input
+            type="number"
+            className="block w-full rounded border border-slate-300 px-2 py-1"
+            placeholder="Priority"
+            value={form.priority}
+            onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
+          />
+          <input
+            className="block w-full rounded border border-slate-300 px-2 py-1"
+            placeholder="Notes"
+            value={form.notes}
+            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+          />
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <button
+            onClick={submit}
+            className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+          >
+            Add
+          </button>
+        </div>
+      )}
+      {configs.length === 0 ? (
+        <p className="mt-2 text-xs text-slate-500">Chưa có config nào.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-slate-100 rounded border border-slate-200 bg-white">
+          {configs.map((w) => (
+            <li key={w.id} className="flex items-center justify-between px-3 py-2 text-sm">
+              <div>
+                <div className="font-medium">{w.ssid}</div>
+                <div className="font-mono text-xs text-slate-500">
+                  {w.bssid ?? '(SSID-only)'} · priority {w.priority}
+                </div>
+              </div>
+              {canEdit && (
+                <button
+                  onClick={() => remove(w.id)}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function GeofenceSection({
+  branchId,
+  geofences,
+  canEdit,
+  onChange,
+}: {
+  branchId: string;
+  geofences: Geofence[];
+  canEdit: boolean;
+  onChange: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({
+    name: '',
+    center_lat: 0,
+    center_lng: 0,
+    radius_meters: 100,
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await getApi().post(`branches/${branchId}/geofences`, {
+        json: {
+          name: form.name,
+          center_lat: Number(form.center_lat),
+          center_lng: Number(form.center_lng),
+          radius_meters: Number(form.radius_meters),
+        },
+      });
+      setForm({ name: '', center_lat: 0, center_lng: 0, radius_meters: 100 });
+      setAdding(false);
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('Xoá geofence này?')) return;
+    try {
+      await getApi().delete(`branches/${branchId}/geofences/${id}`);
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <section className="mt-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Geofences ({geofences.length})</h3>
+        {canEdit && (
+          <button onClick={() => setAdding((v) => !v)} className="text-xs text-slate-600 hover:underline">
+            {adding ? 'Cancel' : '+ Add'}
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
+          <input
+            className="block w-full rounded border border-slate-300 px-2 py-1"
+            placeholder="Name (ví dụ: Main entrance)"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          />
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="any"
+              className="block w-full rounded border border-slate-300 px-2 py-1"
+              placeholder="Latitude"
+              value={form.center_lat}
+              onChange={(e) => setForm((f) => ({ ...f, center_lat: Number(e.target.value) }))}
+            />
+            <input
+              type="number"
+              step="any"
+              className="block w-full rounded border border-slate-300 px-2 py-1"
+              placeholder="Longitude"
+              value={form.center_lng}
+              onChange={(e) => setForm((f) => ({ ...f, center_lng: Number(e.target.value) }))}
+            />
+          </div>
+          <input
+            type="number"
+            min={10}
+            max={5000}
+            className="block w-full rounded border border-slate-300 px-2 py-1"
+            placeholder="Radius (m)"
+            value={form.radius_meters}
+            onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
+          />
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <button
+            onClick={submit}
+            className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+          >
+            Add
+          </button>
+        </div>
+      )}
+      {geofences.length === 0 ? (
+        <p className="mt-2 text-xs text-slate-500">Chưa có geofence nào.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-slate-100 rounded border border-slate-200 bg-white">
+          {geofences.map((g) => (
+            <li key={g.id} className="flex items-center justify-between px-3 py-2 text-sm">
+              <div>
+                <div className="font-medium">{g.name}</div>
+                <div className="font-mono text-xs text-slate-500">
+                  {Number(g.centerLat).toFixed(4)}, {Number(g.centerLng).toFixed(4)} · {g.radiusMeters}m
+                </div>
+              </div>
+              {canEdit && (
+                <button
+                  onClick={() => remove(g.id)}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [form, setForm] = useState({
+    code: '',
+    name: '',
+    address: '',
+    latitude: 10.7769,
+    longitude: 106.7009,
+    radius_meters: 150,
+    timezone: 'Asia/Ho_Chi_Minh',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await getApi().post('branches', {
+        json: {
+          code: form.code,
+          name: form.name,
+          address: form.address || undefined,
+          latitude: Number(form.latitude),
+          longitude: Number(form.longitude),
+          radius_meters: Number(form.radius_meters),
+          timezone: form.timezone,
+        },
+      });
+      onSuccess();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <form
+        onSubmit={submit}
+        className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-semibold">Tạo chi nhánh mới</h2>
+
+        <label className="block text-sm">
+          <span className="text-slate-600">Code (unique)</span>
+          <input
+            required
+            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            placeholder="HCM-Q1"
+            value={form.code}
+            onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+          />
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-slate-600">Name</span>
+          <input
+            required
+            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          />
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-slate-600">Address</span>
+          <input
+            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            value={form.address}
+            onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+          />
+        </label>
+
+        <div className="flex gap-2">
+          <label className="block flex-1 text-sm">
+            <span className="text-slate-600">Latitude</span>
+            <input
+              type="number"
+              step="any"
+              required
+              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              value={form.latitude}
+              onChange={(e) => setForm((f) => ({ ...f, latitude: Number(e.target.value) }))}
+            />
+          </label>
+          <label className="block flex-1 text-sm">
+            <span className="text-slate-600">Longitude</span>
+            <input
+              type="number"
+              step="any"
+              required
+              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              value={form.longitude}
+              onChange={(e) => setForm((f) => ({ ...f, longitude: Number(e.target.value) }))}
+            />
+          </label>
+        </div>
+
+        <label className="block text-sm">
+          <span className="text-slate-600">Radius (10–5000m)</span>
+          <input
+            type="number"
+            min={10}
+            max={5000}
+            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            value={form.radius_meters}
+            onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
+          />
+        </label>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          >
+            {submitting ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
