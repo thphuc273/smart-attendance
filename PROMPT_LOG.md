@@ -132,6 +132,98 @@ Mới tạo, sẽ tiếp tục log cho các session sau.
 
 ---
 
+## Session #003 — 2026-04-16 — Day 1 Sprint: Foundation + Auth + Branches
+
+### Prompt gốc
+
+> "Hãy bắt đầu sprint 1 — cùng với đó là setup repo github."
+>
+> Follow-up 1: "đã cài gh CLI"
+> Follow-up 2: "tạo branch theo từng feature chi tiết, không được chung chung" (sau khi AI push monolithic scaffold lên main)
+> Follow-up 3: "tạo branch theo từng feature không cần ghi day1, day2"
+
+### 1. Research (trước khi sinh code)
+
+Đã đọc lại:
+- `docs/sprint-plan.md` Day 1 (DoD, files cần tạo, endpoint list)
+- `docs/spec.md §3` (RBAC 3 role), §4.1 (check-in flow), §8 (scale)
+- `docs/erd.md §3` (Day 1 tables: users, roles, branches, departments, wifi, geofences, schedules, audit)
+- `docs/api-spec.md §2, §3` (auth + branches endpoints)
+- `docs/CLAUDE.md §4.2` (NestJS conventions), §5.3 (validation 2 layers)
+
+### 2. Quyết định kỹ thuật (phát sinh trong session)
+
+| # | Câu hỏi | Quyết định | Rationale |
+|---|---|---|---|
+| 1 | Nx vs pnpm workspaces? | **pnpm workspaces**, Nx để sau | Nx CLI init vào repo đã có files phức tạp; pnpm đủ cho 5-day MVP. Log lại để xem xét thêm Nx khi build cache cần thiết |
+| 2 | Refresh token blocklist? | **Stateless MVP**, revoke list Day 4 | Giảm scope Day 1, không cần Redis session cho MVP |
+| 3 | Manager → branch relation | Bảng riêng `manager_branches` (M:N) | 1 manager có thể phụ trách nhiều chi nhánh (spec §3). Lưu sẵn `managed_branch_ids` trong JWT claim để guard nhanh, không query thêm |
+| 4 | Token storage mobile | `expo-secure-store` (Keychain/Keystore) | CLAUDE.md §8 cấm AsyncStorage cho token. SecureStore dùng Keychain iOS + EncryptedSharedPreferences Android |
+| 5 | Password hash | **argon2**, không bcrypt | Chuẩn OWASP 2023+, default memory 19MB/iter 2 đủ an toàn |
+| 6 | Commit cho scaffold | **Tách per-feature**, không 1 commit gộp | Felix push back khi AI định dùng 1 branch `feature/day1-foundation` duy nhất. Reset main + rebuild 8 feature branches + 8 PRs |
+| 7 | Base commit trên main | Chỉ docs + README + .gitignore | Feature flow đúng Git Flow: main = release, feature = code |
+| 8 | Branch naming | `feature/<scope>` không prefix `day1-` | Theo yêu cầu Felix — tên branch phải tự mô tả feature, không gắn ngày |
+| 9 | PR merge strategy | **Squash merge** + delete branch | Develop history 1 commit/feature, sạch khi grader xem `git log` |
+| 10 | AppModule evolution | Reduced → add AuthModule → add BranchesModule qua 3 PRs | Mỗi feature PR thực sự sửa AppModule, show dependency chain |
+| 11 | tsconfig rootDir | `./src` (loại `prisma/seed.ts`) | Build đầu tiên `dist/src/main.js` do seed nằm ngoài src. Fix bằng rootDir + exclude prisma → `dist/main.js` |
+| 12 | pnpm native builds | `pnpm.onlyBuiltDependencies` whitelist | Tránh pnpm 10 chặn build scripts mặc định; explicit trust cho prisma/argon2/nestjs |
+
+### 3. Sai lầm và cách sửa (quan trọng nhất cho tiêu chí 15%)
+
+**Sai lầm 1: Commit scaffold gộp lên main**
+- Sau khi scaffold xong 30+ files (api, portal, mobile, docker, prisma), AI chạy `git add -A && git commit` thành 1 commit to đùng rồi push lên `main` + tạo GitHub repo. Vi phạm Git Flow rule "Mỗi feature = 1 branch + PR".
+- **Fix**: Force-push main về `5ab34d3` (chỉ docs), tạo 8 feature branch riêng, 8 PRs squash merge vào develop.
+- **Bài học**: Khi bắt đầu implement nhiều thứ song song, **PHẢI** pre-plan branching trước khi `git add`. Không được "commit trước, refactor history sau".
+
+**Sai lầm 2: Đặt tên branch gắn ngày `feature/day1-*`**
+- Nhân thể convention của sprint-plan.md (ngày 1–5), đặt prefix branch theo ngày. Felix reject: tên branch phải mô tả feature, không phải timeline.
+- **Fix**: Rename prefix → `feature/monorepo-tooling`, `feature/auth-module`, v.v.
+- **Bài học**: Branch name là contract dài hạn (người đọc code 6 tháng sau không quan tâm sprint ngày nào), còn sprint tracking thuộc về tên PR/commit message/sprint-plan.md.
+
+**Sai lầm 3: tsconfig include `prisma/seed.ts` → dist layout lệch**
+- Nest build lần đầu ra `dist/src/main.js` thay vì `dist/main.js` vì TypeScript tự set rootDir = common-ancestor của tất cả input.
+- **Fix**: Explicit `rootDir: './src'` + `exclude: ['prisma']`. Seed chạy qua ts-node nên không cần compile.
+- **Bài học**: Với Nest project, luôn set `rootDir` explicit nếu có file TS ngoài `src/`.
+
+### 4. File & PR đã tạo
+
+**Main (baseline):**
+- commit `5ab34d3` — `docs: initial project baseline` (README, docs/, PROMPT_LOG, .gitignore)
+
+**Develop (Day 1 work):**
+| PR | Branch | Scope | Files chính |
+|---|---|---|---|
+| #1 | `feature/monorepo-tooling` | pnpm workspace + tsconfig base + prettier + commitlint | package.json, pnpm-workspace.yaml, tsconfig.base.json, .editorconfig, .prettierrc, commitlint.config.cjs, pnpm-lock.yaml, .npmrc |
+| #2 | `feature/docker-env` | compose + env template | docker-compose.yml, .dockerignore, .env.example |
+| #3 | `feature/prisma-schema-init` | migration #1 + admin seed | apps/api/package.json, schema.prisma, seed.ts |
+| #4 | `feature/api-bootstrap` | NestJS skeleton + common + Dockerfile | apps/api/src/{main,app.module,config,common,modules/prisma}, tsconfig.json, nest-cli.json, Dockerfile |
+| #5 | `feature/auth-module` | JWT login/refresh/me | apps/api/src/modules/auth + AppModule wire |
+| #6 | `feature/branches-module` | Branch CRUD + wifi + geofence | apps/api/src/modules/branches + AppModule wire |
+| #7 | `feature/portal-skeleton` | Next.js 15 + login | apps/portal/* |
+| #8 | `feature/mobile-skeleton` | Expo SDK 51 + login | apps/mobile/* |
+
+Tất cả merged squash, branch tự xóa. `gh pr list --state merged` = 8 items.
+
+### 5. Prompts đáng học lại cho Day 2+
+
+- **Prompt validate schema trước khi gen code**: "Trước khi sinh NestJS module, đọc `docs/erd.md §3 model X` và `docs/api-spec.md §Y` + confirm bảng có chứa đủ field cần cho endpoint, báo lại field thiếu." — tránh AI tự thêm field không có trong schema.
+- **Prompt per-feature branch**: "Sinh code cho feature Z vào branch `feature/<scope>`, chỉ stage files thuộc feature này, không stage files khác đang untracked." — tránh bundle.
+- **Prompt evolve AppModule**: "Khi thêm module mới, update AppModule imports qua commit riêng trong cùng PR, không phải PR scaffold." — show dependency chain.
+
+### 6. Gì chưa làm (Day 2+ carry-over)
+
+- [ ] Unit test `AuthService.login` (happy + 3 sai) — đã liệt kê trong sprint-plan Day 1 §1.5 nhưng skip để ưu tiên scaffold
+- [ ] E2E smoke `POST /auth/login → GET /auth/me`
+- [ ] Husky hooks wire commit-msg (commitlint) + pre-commit (lint-staged) — config có sẵn, chưa install hooks
+- [ ] Branch protection main/develop trên GitHub (require PR, 1 review)
+- [ ] README section "Scale strategy" narrative chi tiết hơn (docs/spec.md §8 đã có, README mới link qua)
+
+### 7. Repo URL
+
+https://github.com/thphuc273/smart-attendance (private)
+
+---
+
 ## Template cho session tiếp theo
 
 ```
