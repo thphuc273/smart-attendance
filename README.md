@@ -30,22 +30,39 @@ Check-in/out qua GPS geofencing + WiFi SSID/BSSID, **Trust Score**, **Anomaly Da
 ```bash
 cp .env.example .env
 docker compose up -d --build
-# → Postgres 5432, Redis 6379, API 3000
 # → Swagger: http://localhost:3000/api/docs
 ```
 
-Container api tự chạy `prisma migrate deploy` + seed admin khi start.
+## Quick Start (Docker)
 
-### Chạy dev local (không Docker cho api)
 ```bash
-pnpm install
-docker compose up -d postgres redis     # chỉ db + cache
-cp .env.example .env
+# 1. Start Postgres & Redis
+cd /Users/phuc.nguyen/Documents/Working/FinOS/smart-attendance
+docker compose up postgres redis -d
+
+# 2. Reset and seed database (includes 7-day test data)
+./scripts/reset-db.sh
+
+# 3. Start API server
 cd apps/api
-pnpm prisma migrate dev                   # tạo schema lần đầu
-pnpm prisma:seed                          # seed admin + work schedule
-pnpm dev                                  # NestJS watch mode
+pnpm install
+pnpm dev
 ```
+
+The API will run at: `http://localhost:3000/api/docs` (Swagger UI)
+
+## Test Accounts
+
+The seed script (`scripts/reset-db.sh`) automatically creates the following test accounts. All passwords are: `*@123` with the role name capitalized (e.g., `Admin@123`).
+
+| Role | Email | Password | Scope |
+|------|-------|----------|-------|
+| **Admin** | `admin@demo.com` | `Admin@123` | Full system |
+| **Manager** | `manager.hcm@demo.com` | `Manager@123` | HCM-Q1 branch only |
+| **Employee**| `employee001@demo.com` | `Employee@123` | Self only |
+| **Employee**| `employee002@demo.com` | `Employee@123` | Self only |
+
+_Note: There are 30 employees named `employee001@demo.com` up to `employee030@demo.com`._
 
 ### Portal (Next.js)
 ```bash
