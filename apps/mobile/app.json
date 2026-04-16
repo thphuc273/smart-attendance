@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Smart Attendance",
+    "slug": "smart-attendance",
+    "scheme": "sa",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "asia.finos.smartattendance",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Cần quyền vị trí để check-in tại chi nhánh.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Cần quyền vị trí nền để zero-tap check-in khi vào vùng chi nhánh.",
+        "UIBackgroundModes": ["location", "fetch"]
+      }
+    },
+    "android": {
+      "package": "asia.finos.smartattendance",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE",
+        "NEARBY_WIFI_DEVICES",
+        "FOREGROUND_SERVICE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
