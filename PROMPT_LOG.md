@@ -224,7 +224,82 @@ https://github.com/thphuc273/smart-attendance (private)
 
 ---
 
-## Template cho session tiếp theo
+## Session #004 — 2026-04-16 — Sprint 1 review + tests + branch protection
+
+### Prompt gốc
+
+> "review, viết test cho sprint 1 và bật branch protection"
+>
+> Follow-up 1: "tạo nhánh và push github theo từng feature chi tiết, không được chung chung" (AI đã lặp lại lỗi delete-branch after merge → feature branches invisible on GitHub)
+> Follow-up 2: "tại sao trên github không thấy branch của feature tương ứng trong sprint 1, kiếm tra lại trước khi tiếp tục"
+> Follow-up 3: "thôi tiếp tục sửa code và review code sprint 1 ở trên"
+
+### 1. Review phương pháp
+
+Thay vì review một mình (dễ bỏ sót), AI đã spawn **Explore subagent** để có cặp mắt độc lập. Prompt tới subagent liệt kê trước các vấn đề AI đã tự tìm ra, yêu cầu skip và chỉ báo issues *không* trùng. Kết quả:
+- Subagent tìm thêm **4 critical** (CORS reflecting + credentials, Swagger exposed in prod, no Cache-Control on auth, /auth/me contract miss `employee` key)
+- **3 high** (HTTP 201 cho POST create, password complexity, refresh error code)
+- **5 minor** (unused sort field, seed transaction atomicity, etc.)
+
+Hiệu quả parallel review: AI đã tự thấy 6 issues; subagent tìm thêm 6 issues unique. Tổng 12. Fix 7 cái trong scope Day 1.
+
+### 2. Quyết định kỹ thuật
+
+| # | Câu hỏi | Quyết định | Rationale |
+|---|---|---|---|
+| 1 | Fix review issues riêng hay gộp? | 1 PR `feature/review-fixes-sprint-1` gom 7 fix | Cùng chủ đề "review follow-up", review overhead thấp hơn tách. |
+| 2 | Test strategy | Unit (mocked Prisma) + E2E (mocked Prisma + supertest, full HTTP stack) | Real DB e2e cần Testcontainers → setup 30+ phút. Mocked e2e đã cover pipe/guard/filter/interceptor wiring. Real DB e2e chờ Day 2 khi schema ổn. |
+| 3 | argon2 mock | `jest.mock('argon2', () => ({...}))` thay vì `jest.spyOn` | `argon2.verify` là non-configurable property → spyOn fail trên call thứ 2. Module mock stable hơn. |
+| 4 | E2E env setup | `test/setup-env.ts` chạy trước module load qua `setupFiles` | `env.validation` (class-validator) throw nếu thiếu var — phải set trước AppModule import. |
+| 5 | E2E appFactory | Mirror `main.ts` bootstrap y hệt (pipes, guards, interceptor, Cache-Control middleware) | E2E chỉ có giá trị nếu stack identical với production. |
+| 6 | Branch protection strictness | main: 1 approval + linear history + conversation resolution; develop: 0 approval + PR required + linear | Solo dev: main phải strict (chống push tay), develop giữ iteration speed. Linear history match squash-merge. |
+| 7 | Delete branch after merge | **Không dùng `--delete-branch`** từ PR #10 trở đi | Felix push back: branches phải visible trên GitHub để làm evidence Git Flow (15% điểm). Grader vào tab Branches thấy đầy đủ `feature/*` đã merged. |
+
+### 3. Sai lầm và fix
+
+**Sai lầm 4 (lặp từ session #003): Dùng `--delete-branch` khi merge PRs #1–#9**
+- Git Flow evidence (tab Branches) trống — chỉ còn main + develop. Felix yêu cầu giữ lại.
+- Fix: từ PR #10 trở đi merge không `--delete-branch`. Branches cũ đã mất → để yên (PR history vẫn còn ở tab Pull Requests, commit message chứa `(#N)` dẫn back).
+- **Bài học**: Evidence cho grader ≠ clean repo. Với 5-day đánh giá, ưu tiên visibility hơn tidiness. CLAUDE.md §6.1 không yêu cầu xóa branch sau merge — đó là default của `gh pr merge` thôi.
+
+**Sai lầm 5: sed in-place xóa trắng file test spec**
+- Chạy `sed -i '' "s/...pattern..."` trên macOS xóa hết nội dung file `auth.service.spec.ts` (0 bytes).
+- Fix: rewrite file hoàn toàn bằng Write tool.
+- **Bài học**: Với refactor phức tạp, dùng `Edit` tool thay vì sed. Nếu phải sed, test trên 1 file copy trước. Chưa rõ root cause — có thể do pattern escape issue với macOS BSD sed. Không điều tra thêm vì rewrite nhanh hơn.
+
+**Sai lầm 6: Test password quá ngắn**
+- E2E test case "wrong password → 401" dùng password `"wrong"` (5 chars) → bị `@MinLength(6)` reject 400 trước khi vào controller → test expected 401, actual 400, fail.
+- Fix: dùng `"wrongpass"` (8 chars). Pass qua DTO, vào service, argon2.verify false, reject 401.
+- **Bài học**: Khi test failure path, nhớ mọi lớp validation trước đó phải pass để path target được reach.
+
+### 4. Files & PRs
+
+| PR | Branch | Scope | Files | Tests |
+|---|---|---|---|---|
+| #10 | `feature/review-fixes-sprint-1` | 7 security + spec fixes | 7 files (main.ts CORS/Swagger/Cache, branches ensureExists, @HttpCode 201, getMe employee:null, Dockerfile, .env.example) | — |
+| #11 | `feature/api-unit-tests` | Unit tests | 4 specs | **34 pass** (AuthService 8, BranchesService 14, RolesGuard 5, BranchScopeGuard 7) |
+| #12 | `feature/api-e2e-tests` | HTTP e2e | 5 files (config + factory + env + 2 specs) | **15 pass** (Auth 6, Branches 9) |
+| #13 | `chore/branch-protection` | Protection script | 1 file | Script applied live to repo |
+
+**Tổng: 49 tests green, ~4s total.**
+
+### 5. Commands đáng note
+
+```bash
+# Apply/restore branch protection idempotently
+./scripts/setup-branch-protection.sh [owner/repo]
+
+# Verify
+gh api repos/thphuc273/smart-attendance/branches/main/protection | jq '.required_linear_history.enabled'  # → true
+```
+
+### 6. Gì chưa làm (Day 2+ carry-over)
+
+- [ ] Real PostgreSQL e2e (Testcontainers) — Day 2 khi có Employee table mới làm
+- [ ] CI workflow GitHub Actions — chạy `pnpm test` + `pnpm test:e2e` trên PR — Day 3 (dọc đường hoàn tất MVP)
+- [ ] Husky hooks wire — config sẵn, install pending
+- [ ] Password complexity rule (agent finding #5) — defer, MVP chấp nhận MinLength(6)
+- [ ] Seed transaction atomicity (agent finding #12) — low risk, skip
 
 ```
 ## Session #00X — YYYY-MM-DD — <tiêu đề ngắn>
