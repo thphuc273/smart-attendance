@@ -90,7 +90,7 @@ export default function ReportsPage() {
     <>
       <TopNav />
       <main className="mx-auto max-w-6xl p-6">
-        <h1 className="text-2xl font-bold">Reports</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Reports</h1>
         <p className="mt-1 text-sm text-slate-600">Daily summary theo branch + CSV export.</p>
 
         <form
@@ -103,7 +103,7 @@ export default function ReportsPage() {
           <label className="text-sm">
             <span className="text-slate-600">Branch</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.branch_id}
               onChange={(e) => setFilters((f) => ({ ...f, branch_id: e.target.value }))}
             >
@@ -119,7 +119,7 @@ export default function ReportsPage() {
             <span className="text-slate-600">From</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_from}
               onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value }))}
             />
@@ -128,23 +128,23 @@ export default function ReportsPage() {
             <span className="text-slate-600">To</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_to}
               onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value }))}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
         <section className="mt-6">
           <h2 className="text-lg font-semibold">Daily summary</h2>
-          <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <div className="mt-2 overflow-x-auto rounded-2xl bg-white shadow-card">
             <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Branch</th>
@@ -281,7 +281,7 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
       <button
         onClick={submit}
         disabled={!canExport || submitting}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+        className="btn-primary"
       >
         {submitting ? 'Enqueuing…' : 'Enqueue export'}
       </button>
@@ -313,7 +313,7 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
           {status.status === 'completed' && (
             <button
               onClick={download}
-              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
             >
               ⬇ Download CSV
             </button>

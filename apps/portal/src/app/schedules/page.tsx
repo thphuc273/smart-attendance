@@ -60,7 +60,7 @@ export default function SchedulesPage() {
       <main className="mx-auto max-w-5xl p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Work schedules</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Work schedules</h1>
             <p className="mt-1 text-sm text-slate-600">
               Cấu hình ca làm (giờ bắt đầu/kết thúc, grace, overtime) và assign cho nhân viên.
             </p>
@@ -68,14 +68,14 @@ export default function SchedulesPage() {
           {admin && (
             <button
               onClick={() => setCreating(true)}
-              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+              className="btn-primary"
             >
               + New schedule
             </button>
           )}
         </div>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           {loading && <p className="text-slate-500">Đang tải…</p>}
@@ -92,7 +92,7 @@ export default function SchedulesPage() {
                     {s.overtime_after_minutes}m
                   </p>
                 </div>
-                <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">
                   {s.assignment_count} gán
                 </span>
               </div>
@@ -104,7 +104,7 @@ export default function SchedulesPage() {
                       key={d}
                       className={
                         active
-                          ? 'rounded bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white'
+                          ? 'rounded-md bg-gradient-to-br from-brand-500 to-violet-500 px-2 py-0.5 text-[10px] font-semibold text-white'
                           : 'rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-400'
                       }
                     >
@@ -117,7 +117,7 @@ export default function SchedulesPage() {
                 <div className="mt-3 flex gap-2">
                   <button
                     onClick={() => setAssignTo(s)}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                   >
                     Manage assignments
                   </button>
@@ -188,7 +188,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Tạo ca làm mới</h2>
@@ -197,7 +197,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <span className="text-slate-600">Name</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Night shift"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -210,7 +210,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             <input
               type="time"
               required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.start_time}
               onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))}
             />
@@ -220,7 +220,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             <input
               type="time"
               required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.end_time}
               onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))}
             />
@@ -234,7 +234,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               type="number"
               min={0}
               max={120}
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.grace_minutes}
               onChange={(e) => setForm((f) => ({ ...f, grace_minutes: Number(e.target.value) }))}
             />
@@ -245,7 +245,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               type="number"
               min={0}
               max={300}
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.overtime_after_minutes}
               onChange={(e) => setForm((f) => ({ ...f, overtime_after_minutes: Number(e.target.value) }))}
             />
@@ -262,7 +262,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                 onClick={() => toggleDay(d)}
                 className={
                   form.workdays.includes(d)
-                    ? 'flex-1 rounded bg-slate-900 py-1 text-xs font-medium text-white'
+                    ? 'flex-1 rounded-md bg-gradient-to-br from-brand-500 to-violet-500 py-1 text-xs font-semibold text-white'
                     : 'flex-1 rounded border border-slate-300 py-1 text-xs'
                 }
               >
@@ -281,7 +281,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <button
             type="submit"
             disabled={submitting || form.workdays.length === 0}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+            className="btn-primary"
           >
             {submitting ? 'Creating…' : 'Create'}
           </button>
@@ -403,7 +403,7 @@ function AssignmentsDrawer({
             <label className="block">
               <span className="text-slate-600">Employee</span>
               <select
-                className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+                className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                 value={form.employee_id}
                 onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))}
               >
@@ -419,7 +419,7 @@ function AssignmentsDrawer({
                 <span className="text-slate-600">From</span>
                 <input
                   type="date"
-                  className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                   value={form.effective_from}
                   onChange={(e) => setForm((f) => ({ ...f, effective_from: e.target.value }))}
                 />
@@ -428,7 +428,7 @@ function AssignmentsDrawer({
                 <span className="text-slate-600">To (optional)</span>
                 <input
                   type="date"
-                  className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                   value={form.effective_to}
                   onChange={(e) => setForm((f) => ({ ...f, effective_to: e.target.value }))}
                 />
@@ -436,7 +436,7 @@ function AssignmentsDrawer({
             </div>
             <button
               onClick={submitAssign}
-              className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+              className="btn-primary py-1 text-xs"
             >
               Assign
             </button>

@@ -69,7 +69,7 @@ export default function BranchesPage() {
       <main className="mx-auto max-w-6xl p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Branches</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Branches</h1>
             <p className="mt-1 text-sm text-slate-600">
               Quản lý chi nhánh, WiFi whitelist và geofence.{' '}
               {!admin && <span className="text-amber-600">(manager: chỉ xem scope của mình)</span>}
@@ -78,7 +78,7 @@ export default function BranchesPage() {
           {admin && (
             <button
               onClick={() => setCreating(true)}
-              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+              className="btn-primary"
             >
               + New branch
             </button>
@@ -95,7 +95,7 @@ export default function BranchesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Search (code/name)</span>
             <input
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="HCM-Q1"
@@ -104,7 +104,7 @@ export default function BranchesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Status</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
@@ -114,16 +114,16 @@ export default function BranchesPage() {
               <option value="closed">closed</option>
             </select>
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-4 overflow-x-auto rounded-2xl bg-white shadow-card">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-3 py-2">Code</th>
                 <th className="px-3 py-2">Name</th>
@@ -164,7 +164,7 @@ export default function BranchesPage() {
                   <td className="px-3 py-2">
                     <button
                       onClick={() => setDetailOf(b)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                     >
                       Detail
                     </button>
@@ -207,7 +207,7 @@ function StatusBadge({ status }: { status: string }) {
       : status === 'inactive'
         ? 'bg-slate-100 text-slate-700'
         : 'bg-red-100 text-red-700';
-  return <span className={`rounded px-2 py-0.5 text-xs ${tone}`}>{status}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{status}</span>;
 }
 
 function Pagination({ meta, onChange }: { meta: ListResp['meta']; onChange: (p: number) => void }) {
@@ -433,7 +433,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <label className="block">
         <span className="text-slate-600">Name</span>
         <input
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
         />
@@ -441,7 +441,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <label className="block">
         <span className="text-slate-600">Address</span>
         <input
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.address}
           onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
         />
@@ -452,7 +452,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
           type="number"
           min={10}
           max={5000}
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.radius_meters}
           onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
         />
@@ -460,7 +460,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <label className="block">
         <span className="text-slate-600">Status</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.status}
           onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Branch['status'] }))}
         >
@@ -473,7 +473,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <button
         type="submit"
         disabled={submitting}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className="btn-primary"
       >
         {submitting ? 'Saving…' : 'Save'}
       </button>
@@ -538,26 +538,26 @@ function WifiSection({
       {adding && (
         <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="SSID (ví dụ: Office-5G)"
             value={form.ssid}
             onChange={(e) => setForm((f) => ({ ...f, ssid: e.target.value }))}
           />
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-mono"
             placeholder="BSSID aa:bb:cc:dd:ee:ff (optional)"
             value={form.bssid}
             onChange={(e) => setForm((f) => ({ ...f, bssid: e.target.value }))}
           />
           <input
             type="number"
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Priority"
             value={form.priority}
             onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
           />
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Notes"
             value={form.notes}
             onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
@@ -565,7 +565,7 @@ function WifiSection({
           {error && <p className="text-xs text-red-600">{error}</p>}
           <button
             onClick={submit}
-            className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+            className="btn-primary py-1 text-xs"
           >
             Add
           </button>
@@ -661,7 +661,7 @@ function GeofenceSection({
       {adding && (
         <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Name (ví dụ: Main entrance)"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -670,7 +670,7 @@ function GeofenceSection({
             <input
               type="number"
               step="any"
-              className="block w-full rounded border border-slate-300 px-2 py-1"
+              className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="Latitude"
               value={form.center_lat}
               onChange={(e) => setForm((f) => ({ ...f, center_lat: Number(e.target.value) }))}
@@ -678,7 +678,7 @@ function GeofenceSection({
             <input
               type="number"
               step="any"
-              className="block w-full rounded border border-slate-300 px-2 py-1"
+              className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="Longitude"
               value={form.center_lng}
               onChange={(e) => setForm((f) => ({ ...f, center_lng: Number(e.target.value) }))}
@@ -688,7 +688,7 @@ function GeofenceSection({
             type="number"
             min={10}
             max={5000}
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Radius (m)"
             value={form.radius_meters}
             onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
@@ -696,7 +696,7 @@ function GeofenceSection({
           {error && <p className="text-xs text-red-600">{error}</p>}
           <button
             onClick={submit}
-            className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+            className="btn-primary py-1 text-xs"
           >
             Add
           </button>
@@ -771,7 +771,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Tạo chi nhánh mới</h2>
@@ -780,7 +780,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <span className="text-slate-600">Code (unique)</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="HCM-Q1"
             value={form.code}
             onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
@@ -791,7 +791,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <span className="text-slate-600">Name</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           />
@@ -800,7 +800,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
         <label className="block text-sm">
           <span className="text-slate-600">Address</span>
           <input
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.address}
             onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
           />
@@ -813,7 +813,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               type="number"
               step="any"
               required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.latitude}
               onChange={(e) => setForm((f) => ({ ...f, latitude: Number(e.target.value) }))}
             />
@@ -824,7 +824,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               type="number"
               step="any"
               required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.longitude}
               onChange={(e) => setForm((f) => ({ ...f, longitude: Number(e.target.value) }))}
             />
@@ -837,7 +837,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             type="number"
             min={10}
             max={5000}
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.radius_meters}
             onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
           />
@@ -856,7 +856,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <button
             type="submit"
             disabled={submitting}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            className="btn-primary"
           >
             {submitting ? 'Creating…' : 'Create'}
           </button>

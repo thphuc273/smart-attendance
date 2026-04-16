@@ -82,7 +82,7 @@ export default function EmployeesPage() {
       <main className="mx-auto max-w-6xl p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Employees</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Employees</h1>
             <p className="mt-1 text-sm text-slate-600">
               Quản lý nhân viên, device trust, branch assignments.
               {!admin && <span className="ml-1 text-amber-600">(manager: read-only trong scope)</span>}
@@ -91,7 +91,7 @@ export default function EmployeesPage() {
           {admin && (
             <button
               onClick={() => setCreating(true)}
-              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+              className="btn-primary"
             >
               + New employee
             </button>
@@ -108,7 +108,7 @@ export default function EmployeesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Search (name/code/email)</span>
             <input
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.search}
               onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
               placeholder="EMP001"
@@ -117,7 +117,7 @@ export default function EmployeesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Branch</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.branch_id}
               onChange={(e) => setFilters((f) => ({ ...f, branch_id: e.target.value }))}
             >
@@ -130,7 +130,7 @@ export default function EmployeesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Status</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.status}
               onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
             >
@@ -140,16 +140,16 @@ export default function EmployeesPage() {
               <option value="terminated">terminated</option>
             </select>
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-4 overflow-x-auto rounded-2xl bg-white shadow-card">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-3 py-2">Code</th>
                 <th className="px-3 py-2">Name</th>
@@ -180,7 +180,7 @@ export default function EmployeesPage() {
                   <td className="px-3 py-2">
                     <button
                       onClick={() => setDetailOf(e)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                     >
                       Detail
                     </button>
@@ -225,7 +225,7 @@ function StatusBadge({ status }: { status: string }) {
       : status === 'on_leave'
         ? 'bg-amber-100 text-amber-700'
         : 'bg-red-100 text-red-700';
-  return <span className={`rounded px-2 py-0.5 text-xs ${tone}`}>{status}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{status}</span>;
 }
 
 function Pagination({ meta, onChange }: { meta: ListResp['meta']; onChange: (p: number) => void }) {
@@ -373,7 +373,7 @@ function DetailDrawer({
                   </div>
                   <button
                     onClick={() => toggleTrust(d)}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                   >
                     {d.isTrusted ? 'Revoke' : 'Trust'}
                   </button>
@@ -469,7 +469,7 @@ function EditForm({
       <label className="block">
         <span className="text-slate-600">Full name</span>
         <input
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.full_name}
           onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
         />
@@ -477,7 +477,7 @@ function EditForm({
       <label className="block">
         <span className="text-slate-600">Primary branch</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.primary_branch_id}
           onChange={(e) => setForm((f) => ({ ...f, primary_branch_id: e.target.value }))}
         >
@@ -489,7 +489,7 @@ function EditForm({
       <label className="block">
         <span className="text-slate-600">Status</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.employment_status}
           onChange={(e) => setForm((f) => ({ ...f, employment_status: e.target.value as Employee['employment_status'] }))}
         >
@@ -502,7 +502,7 @@ function EditForm({
       <button
         type="submit"
         disabled={submitting}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className="btn-primary"
       >
         {submitting ? 'Saving…' : 'Save'}
       </button>
@@ -554,7 +554,7 @@ function AssignmentForm({
       <label className="block">
         <span className="text-slate-600">Branch</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.branch_id}
           onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value }))}
         >
@@ -566,7 +566,7 @@ function AssignmentForm({
       <label className="block">
         <span className="text-slate-600">Type</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.assignment_type}
           onChange={(e) => setForm((f) => ({ ...f, assignment_type: e.target.value as 'secondary' }))}
         >
@@ -579,7 +579,7 @@ function AssignmentForm({
           <span className="text-slate-600">From</span>
           <input
             type="date"
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.effective_from}
             onChange={(e) => setForm((f) => ({ ...f, effective_from: e.target.value }))}
           />
@@ -588,7 +588,7 @@ function AssignmentForm({
           <span className="text-slate-600">To (optional)</span>
           <input
             type="date"
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.effective_to}
             onChange={(e) => setForm((f) => ({ ...f, effective_to: e.target.value }))}
           />
@@ -655,7 +655,7 @@ function CreateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Tạo nhân viên mới</h2>
@@ -665,7 +665,7 @@ function CreateModal({
             <span className="text-slate-600">Employee code</span>
             <input
               required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="EMP031"
               value={form.employee_code}
               onChange={(e) => setForm((f) => ({ ...f, employee_code: e.target.value }))}
@@ -674,7 +674,7 @@ function CreateModal({
           <label className="block flex-1 text-sm">
             <span className="text-slate-600">Role</span>
             <select
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.role}
               onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as 'employee' }))}
             >
@@ -689,7 +689,7 @@ function CreateModal({
           <span className="text-slate-600">Full name</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.full_name}
             onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
           />
@@ -700,7 +700,7 @@ function CreateModal({
           <input
             type="email"
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.email}
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
           />
@@ -712,7 +712,7 @@ function CreateModal({
             type="text"
             required
             minLength={6}
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.password}
             onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
           />
@@ -721,7 +721,7 @@ function CreateModal({
         <label className="block text-sm">
           <span className="text-slate-600">Phone</span>
           <input
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.phone}
             onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
           />
@@ -731,7 +731,7 @@ function CreateModal({
           <span className="text-slate-600">Primary branch</span>
           <select
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.primary_branch_id}
             onChange={(e) => setForm((f) => ({ ...f, primary_branch_id: e.target.value }))}
           >
@@ -750,7 +750,7 @@ function CreateModal({
           <button
             type="submit"
             disabled={submitting}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            className="btn-primary"
           >
             {submitting ? 'Creating…' : 'Create'}
           </button>

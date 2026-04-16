@@ -151,91 +151,82 @@ export default function CheckinPage() {
     <>
       <TopNav />
       <main className="mx-auto max-w-3xl p-6">
-        <h1 className="text-2xl font-bold">Chấm công</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Chào {user.full_name ?? user.email}. Trình duyệt sẽ xin quyền vị trí khi bạn bấm check-in/out.
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Chấm công</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Xin chào {user.full_name ?? user.email} 👋 Trình duyệt sẽ hỏi quyền Vị trí khi bạn bấm.
         </p>
 
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+        <section className="mt-6 overflow-hidden rounded-2xl bg-white p-6 shadow-card">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Hôm nay</p>
-              <p className="text-lg font-semibold">
-                {new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Hôm nay</p>
+              <p className="mt-1 text-xl font-bold text-slate-900">
+                {new Date().toLocaleDateString('vi-VN', {
+                  weekday: 'long',
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                })}
               </p>
             </div>
-            {today && (
-              <span
-                className={
-                  today.status === 'on_time'
-                    ? 'rounded bg-green-100 px-2 py-0.5 text-xs text-green-700'
-                    : today.status === 'late'
-                      ? 'rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700'
-                      : 'rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700'
-                }
-              >
-                {today.status}
-              </span>
-            )}
+            {today && <StatusPill status={today.status} />}
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <div className="rounded border border-slate-200 p-3">
-              <p className="text-xs text-slate-500">Check-in</p>
-              <p className="font-mono text-base">
-                {today?.checkInAt
-                  ? new Date(today.checkInAt).toLocaleTimeString('vi-VN')
-                  : '—'}
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-emerald-50/60 p-4">
+              <p className="text-xs font-medium text-emerald-700">Check-in</p>
+              <p className="mt-1 font-mono text-lg font-semibold text-slate-900">
+                {today?.checkInAt ? new Date(today.checkInAt).toLocaleTimeString('vi-VN') : '—'}
               </p>
             </div>
-            <div className="rounded border border-slate-200 p-3">
-              <p className="text-xs text-slate-500">Check-out</p>
-              <p className="font-mono text-base">
-                {today?.checkOutAt
-                  ? new Date(today.checkOutAt).toLocaleTimeString('vi-VN')
-                  : '—'}
+            <div className="rounded-xl bg-brand-50/60 p-4">
+              <p className="text-xs font-medium text-brand-700">Check-out</p>
+              <p className="mt-1 font-mono text-lg font-semibold text-slate-900">
+                {today?.checkOutAt ? new Date(today.checkOutAt).toLocaleTimeString('vi-VN') : '—'}
               </p>
             </div>
           </div>
 
-          <div className="mt-4 flex gap-3">
+          <div className="mt-5 flex gap-3">
             <button
               onClick={() => doCheck('in')}
               disabled={submitting !== null || (checkedIn && !today?.checkOutAt)}
-              className="flex-1 rounded bg-slate-900 py-3 text-sm font-semibold text-white disabled:opacity-40"
+              className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 py-3.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-md"
             >
-              {submitting === 'in' ? 'Đang check-in…' : checkedIn ? 'Đã check-in' : 'Check-in'}
+              {submitting === 'in' ? 'Đang check-in…' : checkedIn ? '✓ Đã check-in' : '→ Check-in'}
             </button>
             <button
               onClick={() => doCheck('out')}
               disabled={submitting !== null || !checkedIn || checkedOut}
-              className="flex-1 rounded border-2 border-slate-900 py-3 text-sm font-semibold text-slate-900 disabled:opacity-40"
+              className="flex-1 rounded-xl border-2 border-brand-600 bg-white py-3 text-sm font-semibold text-brand-700 transition-colors hover:bg-brand-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting === 'out' ? 'Đang check-out…' : checkedOut ? 'Đã check-out' : 'Check-out'}
+              {submitting === 'out' ? 'Đang check-out…' : checkedOut ? '✓ Đã check-out' : '← Check-out'}
             </button>
           </div>
 
           {message && (
-            <p
+            <div
               className={
                 message.kind === 'ok'
-                  ? 'mt-3 rounded bg-green-50 p-2 text-sm text-green-700'
-                  : 'mt-3 rounded bg-red-50 p-2 text-sm text-red-700'
+                  ? 'mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-medium text-emerald-800'
+                  : 'mt-4 rounded-xl bg-rose-50 p-3 text-sm font-medium text-rose-700'
               }
             >
               {message.text}
-            </p>
+            </div>
           )}
 
           {lastResult && (
-            <dl className="mt-3 space-y-1 rounded bg-slate-50 p-3 text-xs">
+            <dl className="mt-4 space-y-1.5 rounded-xl bg-gradient-to-br from-brand-50/50 to-violet-50/50 p-4 text-xs">
               <div className="flex justify-between">
                 <dt className="text-slate-500">Validation</dt>
-                <dd className="font-mono">{lastResult.validation_method}</dd>
+                <dd className="font-mono font-semibold text-slate-900">{lastResult.validation_method}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">Trust score</dt>
-                <dd className="font-mono">{lastResult.trust_score} ({lastResult.trust_level})</dd>
+                <dd className="font-mono font-semibold text-brand-700">
+                  {lastResult.trust_score} <span className="font-normal">({lastResult.trust_level})</span>
+                </dd>
               </div>
               {lastResult.risk_flags.length > 0 && (
                 <div className="flex justify-between">
@@ -246,57 +237,66 @@ export default function CheckinPage() {
               {lastResult.worked_minutes !== undefined && (
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Worked</dt>
-                  <dd className="font-mono">{lastResult.worked_minutes} min</dd>
+                  <dd className="font-mono font-semibold text-slate-900">{lastResult.worked_minutes} min</dd>
                 </div>
               )}
               {lastResult.overtime_minutes !== undefined && lastResult.overtime_minutes > 0 && (
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Overtime</dt>
-                  <dd className="font-mono text-green-700">{lastResult.overtime_minutes} min</dd>
+                  <dd className="font-mono font-semibold text-emerald-600">{lastResult.overtime_minutes} min</dd>
                 </div>
               )}
             </dl>
           )}
         </section>
 
-        <section className="mt-6">
-          <h2 className="text-lg font-semibold">Lịch sử 14 ngày gần nhất</h2>
+        <section className="mt-8">
+          <h2 className="text-xl font-bold text-slate-900">📊 14 ngày gần nhất</h2>
 
           <HistorySummary history={history} />
 
-          <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="mt-4 overflow-hidden rounded-2xl bg-white shadow-card">
             {history.length === 0 ? (
-              <p className="p-4 text-sm text-slate-500">Chưa có session.</p>
+              <p className="p-6 text-sm text-slate-400">Chưa có session.</p>
             ) : (
               <table className="w-full text-sm">
-                <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                   <tr>
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">In</th>
-                    <th className="px-3 py-2">Out</th>
-                    <th className="px-3 py-2 text-right">Late / OT</th>
-                    <th className="px-3 py-2 text-right">Trust</th>
+                    <th className="px-4 py-3">Ngày</th>
+                    <th className="px-4 py-3">Trạng thái</th>
+                    <th className="px-4 py-3">In</th>
+                    <th className="px-4 py-3">Out</th>
+                    <th className="px-4 py-3 text-right">Late / OT</th>
+                    <th className="px-4 py-3 text-right">Trust</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((s) => (
-                    <tr key={s.id} className="border-b border-slate-100 last:border-0">
-                      <td className="px-3 py-2 font-mono text-xs">{s.workDate.slice(0, 10)}</td>
-                      <td className="px-3 py-2">{s.status}</td>
-                      <td className="px-3 py-2 font-mono text-xs">
+                    <tr
+                      key={s.id}
+                      className="border-b border-slate-50 last:border-0 transition-colors hover:bg-slate-50/60"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                        {s.workDate.slice(0, 10)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusPill status={s.status} />
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">
                         {s.checkInAt ? new Date(s.checkInAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '—'}
                       </td>
-                      <td className="px-3 py-2 font-mono text-xs">
+                      <td className="px-4 py-3 font-mono text-xs">
                         {s.checkOutAt ? new Date(s.checkOutAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs">
-                        {s.lateMinutes ? <span className="text-amber-600">L{s.lateMinutes}</span> : null}
-                        {s.lateMinutes && s.overtimeMinutes ? ' / ' : null}
-                        {s.overtimeMinutes ? <span className="text-green-700">OT{s.overtimeMinutes}</span> : null}
-                        {!s.lateMinutes && !s.overtimeMinutes ? '—' : null}
+                      <td className="px-4 py-3 text-right text-xs">
+                        {s.lateMinutes ? <span className="font-semibold text-amber-600">L{s.lateMinutes}</span> : null}
+                        {s.lateMinutes && s.overtimeMinutes ? ' · ' : null}
+                        {s.overtimeMinutes ? <span className="font-semibold text-emerald-600">OT{s.overtimeMinutes}</span> : null}
+                        {!s.lateMinutes && !s.overtimeMinutes ? <span className="text-slate-300">—</span> : null}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono text-xs">{s.trustScore ?? '—'}</td>
+                      <td className="px-4 py-3 text-right">
+                        <TrustPill score={s.trustScore} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -307,6 +307,30 @@ export default function CheckinPage() {
       </main>
     </>
   );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const TONE: Record<string, string> = {
+    on_time: 'bg-emerald-100 text-emerald-700',
+    late: 'bg-amber-100 text-amber-700',
+    overtime: 'bg-sky-100 text-sky-700',
+    early_leave: 'bg-rose-100 text-rose-700',
+    absent: 'bg-rose-100 text-rose-700',
+    missing_checkout: 'bg-amber-100 text-amber-700',
+  };
+  const cls = TONE[status] ?? 'bg-slate-100 text-slate-600';
+  return <span className={`badge ${cls}`}>{status}</span>;
+}
+
+function TrustPill({ score }: { score: number | null }) {
+  if (score === null) return <span className="text-xs text-slate-300">—</span>;
+  const cls =
+    score >= 70
+      ? 'bg-emerald-100 text-emerald-700'
+      : score >= 40
+        ? 'bg-amber-100 text-amber-700'
+        : 'bg-rose-100 text-rose-700';
+  return <span className={`badge font-mono ${cls}`}>{score}</span>;
 }
 
 function HistorySummary({ history }: { history: Session[] }) {
@@ -321,26 +345,42 @@ function HistorySummary({ history }: { history: Session[] }) {
   const totalLate = history.reduce((sum, s) => sum + (s.lateMinutes ?? 0), 0);
 
   return (
-    <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-4">
-      <SummaryStat label="On-time" value={onTime} tone="green" />
+    <div className="mt-3 grid grid-cols-2 gap-3 rounded-2xl bg-white p-4 shadow-card sm:grid-cols-4">
+      <SummaryStat label="On-time" value={onTime} tone="emerald" />
       <SummaryStat label="Late / OT" value={late} tone="amber" />
-      <SummaryStat label="Absent" value={absent} tone="red" />
-      <SummaryStat label="Missing checkout" value={missing} tone="slate" />
-      <SummaryStat label="Total worked" value={`${Math.round(totalWorked / 60)}h`} tone="slate" />
-      <SummaryStat label="Total overtime" value={`${totalOT}m`} tone="green" />
-      <SummaryStat label="Total late" value={`${totalLate}m`} tone="amber" />
-      <SummaryStat label="Days logged" value={history.length} tone="slate" />
+      <SummaryStat label="Absent" value={absent} tone="rose" />
+      <SummaryStat label="Missing" value={missing} tone="slate" />
+      <SummaryStat label="Giờ làm" value={`${Math.round(totalWorked / 60)}h`} tone="brand" />
+      <SummaryStat label="OT total" value={`${totalOT}m`} tone="emerald" />
+      <SummaryStat label="Late total" value={`${totalLate}m`} tone="amber" />
+      <SummaryStat label="Ngày" value={history.length} tone="brand" />
     </div>
   );
 }
 
-function SummaryStat({ label, value, tone }: { label: string; value: string | number; tone: 'green' | 'amber' | 'red' | 'slate' }) {
+function SummaryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone: 'emerald' | 'amber' | 'rose' | 'slate' | 'brand';
+}) {
   const color =
-    tone === 'green' ? 'text-green-700' : tone === 'amber' ? 'text-amber-700' : tone === 'red' ? 'text-red-700' : 'text-slate-700';
+    tone === 'emerald'
+      ? 'text-emerald-700'
+      : tone === 'amber'
+        ? 'text-amber-600'
+        : tone === 'rose'
+          ? 'text-rose-600'
+          : tone === 'brand'
+            ? 'text-brand-700'
+            : 'text-slate-600';
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`text-lg font-bold ${color}`}>{value}</p>
+      <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">{label}</p>
+      <p className={`mt-0.5 text-xl font-bold ${color}`}>{value}</p>
     </div>
   );
 }
