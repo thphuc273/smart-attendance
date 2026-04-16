@@ -187,7 +187,15 @@
 - [x] **Portal — Dashboard** (`/dashboard`): stat cards (employees/branches/today/on-time rate), status breakdown, top branches on-time & late, 24h heatmap, **Anomaly cards** (late spikes + low-trust employees + new untrusted devices). Admin sees overview; manager sees anomalies scoped to their branches — PR #21
 - [x] **Portal — Sessions** (`/sessions`): filterable table (status, date range) với pagination + **Override modal** (note ≥3 ký tự, ghi audit log) — PR #21
 - [x] **Portal — Reports** (`/reports`): daily summary table + form filter + **CSV export** (enqueue BullMQ → poll mỗi 1.2s → download blob) — PR #21
-- [x] **Mobile — History** (`/history`): list sessions với **late/overtime badges**, trust-score color-coded, pull-to-refresh — PR #21
+- [x] **Portal — Branches** (`/branches`): CRUD đầy đủ + WiFi whitelist + geofence (thay Day 1 stub) — PR #21
+- [x] **Portal — Check-in** (`/checkin` cho employee role): GPS-based web check-in với device fingerprint + trust score display — PR #21
+- [x] **Portal — Employees** (`/employees`): list + create + detail drawer với edit, devices toggle trust, branch assignments — PR #22
+- [x] **Portal — Schedules** (`/schedules`): card grid + create modal + assignments drawer — PR #23
+- [x] **Portal — Audit logs** (`/audit-logs`): filterable table với expandable before/after JSON diff — PR #24
+- [x] **Portal — Monthly summary** trên `/checkin`: 8 stat tiles (on-time/late/absent/missing/total worked/OT/late/days) — PR #24
+- [x] **Mobile — History** (`/history`): list sessions với late/overtime badges, trust-score color-coded, pull-to-refresh, tap → session detail — PR #21 + PR #25
+- [x] **Mobile — Check-in** (`/checkin`): GPS + device fingerprint + trust result display (expo-location + expo-device) — PR #25
+- [x] **Mobile — Session detail** (`/session/[id]`): session meta + events timeline với validation method, GPS, WiFi, risk flags — PR #25
 - [x] Auth layer chung: portal `useRequireAuth` + ky client với Bearer + 401 redirect; mobile `expo-secure-store` + typed env — PR #21
 
 ### 4.5 Test
@@ -204,14 +212,18 @@
 - [ ] E2E: `missing-checkout` đóng session mở — deferred (cần fixtures)
 
 ### 4.6 End-of-day
-- [x] 4 PR stacked lên `develop`:
+- [x] 8 PR stacked lên `develop`:
   - [#18](https://github.com/thphuc273/smart-attendance/pull/18) `feature/trust-score-schedule` — foundation
   - [#19](https://github.com/thphuc273/smart-attendance/pull/19) `feature/reports-bullmq` — BullMQ + CSV export
   - [#20](https://github.com/thphuc273/smart-attendance/pull/20) `feature/dashboard-manager-anomalies` — anomalies + heatmap read-model
-  - [#21](https://github.com/thphuc273/smart-attendance/pull/21) `feature/sprint4-ui` — portal dashboard/sessions/reports + mobile history + infra fixes
-- [x] 118/118 unit tests pass · api `tsc --noEmit` clean · `nest build` xanh
+  - [#21](https://github.com/thphuc273/smart-attendance/pull/21) `feature/sprint4-ui` — portal dashboard/sessions/reports/branches/checkin + mobile history
+  - [#22](https://github.com/thphuc273/smart-attendance/pull/22) `feature/employees-ui` — portal /employees với device + assignments
+  - [#23](https://github.com/thphuc273/smart-attendance/pull/23) `feature/work-schedules` — API module + portal /schedules
+  - [#24](https://github.com/thphuc273/smart-attendance/pull/24) `feature/audit-logs-polish` — audit API/UI + monthly summary
+  - [#25](https://github.com/thphuc273/smart-attendance/pull/25) `feature/mobile-checkin` — mobile check-in + session detail
+- [x] 130/130 unit tests pass · api `tsc --noEmit` clean · `nest build` xanh
 - [x] Portal + mobile `tsc --noEmit` clean · `next build` xanh
-- [ ] `PROMPT_LOG.md` Session #006: prompt full trust-score, prompt BullMQ scaffold, prompt CSV export, prompt portal dashboard UI
+- [x] PO feature audit: tất cả P0 + P1 đã closed (trừ zero-tap P2 Day 5 scope)
 
 ---
 
