@@ -93,7 +93,8 @@ export class BranchesService {
 
   // ── WiFi configs ──
 
-  listWifi(branchId: string) {
+  async listWifi(branchId: string) {
+    await this.ensureExists(branchId);
     return this.prisma.branchWifiConfig.findMany({
       where: { branchId },
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
@@ -123,7 +124,8 @@ export class BranchesService {
 
   // ── Geofences ──
 
-  listGeofences(branchId: string) {
+  async listGeofences(branchId: string) {
+    await this.ensureExists(branchId);
     return this.prisma.branchGeofence.findMany({
       where: { branchId },
       orderBy: { createdAt: 'desc' },

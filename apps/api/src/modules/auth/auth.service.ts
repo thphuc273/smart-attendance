@@ -88,11 +88,19 @@ export class AuthService {
         },
       },
     });
+    // `employee` filled in Day 2 once Employee model lands. Keep the key in the contract
+    // so portal/mobile can depend on shape stability.
     return {
       id: user.id,
       email: user.email,
       full_name: user.fullName,
       roles: user.userRoles.map((ur) => ur.role.code),
+      employee: null as null | {
+        id: string;
+        employee_code: string;
+        primary_branch: { id: string; name: string };
+        department: { id: string; name: string } | null;
+      },
       managed_branches: user.managedBranches.map((mb) => mb.branch),
     };
   }

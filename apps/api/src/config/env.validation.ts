@@ -36,6 +36,10 @@ class EnvSchema {
   @IsNumber()
   @IsOptional()
   RATE_LIMIT_LOGIN_PER_MINUTE?: number;
+
+  @IsString()
+  @IsOptional()
+  ALLOWED_ORIGINS?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>) {

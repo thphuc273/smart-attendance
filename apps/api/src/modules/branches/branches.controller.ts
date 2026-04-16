@@ -47,6 +47,7 @@ export class BranchesController {
   }
 
   @Post()
+  @HttpCode(201)
   @Roles(RoleCode.admin)
   create(@Body() dto: CreateBranchDto) {
     return this.branches.create(dto);
@@ -75,6 +76,7 @@ export class BranchesController {
   }
 
   @Post(':id/wifi-configs')
+  @HttpCode(201)
   @Roles(RoleCode.admin)
   createWifi(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: CreateWifiConfigDto) {
     return this.branches.createWifi(id, dto);
@@ -100,6 +102,7 @@ export class BranchesController {
   }
 
   @Post(':id/geofences')
+  @HttpCode(201)
   @Roles(RoleCode.admin)
   createGeofence(
     @Param('id', new ParseUUIDPipe()) id: string,
