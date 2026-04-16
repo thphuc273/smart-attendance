@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getApi, hasToken, clearAuth } from './_lib/api';
+import { getApi, hasToken } from './_lib/api';
 
 interface Session {
   id: string;
@@ -57,11 +57,6 @@ export default function HistoryScreen() {
     })();
   }, [load, router]);
 
-  const logout = async () => {
-    await clearAuth();
-    router.replace('/login');
-  };
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -73,10 +68,11 @@ export default function HistoryScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Lịch sử chấm công</Text>
-        <Pressable onPress={logout} hitSlop={8}>
-          <Text style={styles.logout}>Logout</Text>
+        <Pressable onPress={() => router.back()} hitSlop={8}>
+          <Text style={styles.back}>← Check-in</Text>
         </Pressable>
+        <Text style={styles.title}>Lịch sử</Text>
+        <View style={{ width: 80 }} />
       </View>
 
       {error && <Text style={styles.error}>{error}</Text>}
@@ -87,7 +83,11 @@ export default function HistoryScreen() {
         contentContainerStyle={{ padding: 12 }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
         ListEmptyComponent={<Text style={styles.empty}>Chưa có session nào.</Text>}
-        renderItem={({ item }) => <SessionRow session={item} />}
+        renderItem={({ item }) => (
+          <Pressable onPress={() => router.push(`/session/${item.id}` as never)}>
+            <SessionRow session={item} />
+          </Pressable>
+        )}
       />
     </View>
   );
@@ -167,6 +167,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e2e8f0',
   },
   title: { fontSize: 20, fontWeight: '700' },
+  back: { color: '#0f172a', fontSize: 14, fontWeight: '500' },
   logout: { color: '#64748b', fontSize: 13 },
   error: { padding: 12, color: '#dc2626', fontSize: 13 },
   empty: { textAlign: 'center', padding: 40, color: '#64748b' },
