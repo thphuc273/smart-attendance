@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BranchesModule } from './modules/branches/branches.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
     BranchesModule,
     EmployeesModule,
     AttendanceModule,
+    DashboardModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

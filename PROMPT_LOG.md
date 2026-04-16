@@ -324,3 +324,202 @@ gh api repos/thphuc273/smart-attendance/branches/main/protection | jq '.required
 ### Follow-up
 - [ ] TODO 1
 ```
+
+---
+
+## Session #005 — 2026-04-16 — Day 2 Sprint: Employees, Devices, Core Check-in/Check-out
+
+### Prompt gốc
+
+> "Bắt đầu sprint 2"
+>
+> Follow-up: "review và test code của sprint 2, cập nhật PROMPT_LOG"
+
+### 1. Research (trước khi sinh code)
+
+Đã đọc lại toàn bộ codebase Day 1:
+- Prisma schema v1 (10 models Day 1), seed.ts (admin + schedule)
+- NestJS modules: auth (login/refresh/me), branches (CRUD + wifi + geofence)
+- AppModule wiring, guards (JWT, Roles, BranchScope), interceptors, filters
+- Test infrastructure: `app-factory.ts`, `setup-env.ts`, e2e pattern (mocked Prisma + supertest)
+- `docs/sprint-plan.md` Day 2 scope, `docs/erd.md` Day 2 tables, `docs/api-spec.md §4-5`
+
+### 2. Quyết định kỹ thuật
+
+| # | Câu hỏi | Quyết định | Rationale |
+|---|---|---|---|
+| 1 | Trust score rule engine | **Pure function** `calculateTrustScore()` tách riêng `src/common/utils/trust-score.ts` | Spec §5.2 scoring phức tạp (GPS tiers, WiFi, device trust, penalties). Pure function dễ unit test 100% mà không cần DB mock |
+| 2 | GPS validation engine | **Haversine formula** trong `src/common/utils/geo.ts` | MVP không cần Vincenty. Haversine sai <0.3% ở kc <50km, đủ cho geofence 100-200m |
+| 3 | WiFi matching strategy | BSSID exact match (case-insensitive) > SSID fallback | BSSID chống SSID spoofing; SSID-only cho +15 thay vì +35; flag `ssid_only_match` |
+| 4 | Shared utils location | `apps/api/src/common/utils/` thay vì `libs/shared/utils/` | Day 2 chỉ API cần; refactor sang monorepo lib Day 3 khi mobile cần |
+| 5 | Multi-branch check-in | Scan ALL assigned branches (primary + active assignments) | Employee có thể check-in ở branch phụ (temporary assignment), không chỉ primary |
+| 6 | Device auto-register | `upsert` trên `(employeeId, deviceFingerprint)` mỗi check-in | Không bắt nhân viên register device trước — UX mượt hơn, device mới `is_trusted=false` mặc định |
+| 7 | Session idempotency | UNIQUE `(employeeId, workDate)` + check existing success events | Check-in 2x → nếu đã có success event → 409 `ALREADY_CHECKED_IN`. Nếu chỉ có failed events → cho phép retry |
+| 8 | Failed attempt logging | **Luôn log** vào `attendance_events` trước khi throw | Failed events quan trọng cho audit trail và anti-fraud analysis. Transaction đảm bảo event luôn được persist |
+| 9 | Overtime calculation | `workedMinutes` = checkout - checkin; overtime = checkout - scheduled_end (nếu > threshold) | Spec §4.2: overtime chỉ tính khi quá `overtime_after_minutes` (default 60min) so với giờ kết thúc |
+| 10 | Check-out status logic | `early_leave` nếu checkout < scheduled_end; `overtime` nếu vượt threshold | Status cuối cùng phụ thuộc cả check-in (on_time/late) lẫn check-out timing |
+
+### 3. Thiết kế check-in flow (minh họa cho spec §4.1)
+
+```
+JWT token → identify employee → load assigned branches
+    ↓
+For each branch:
+  ├─ GPS: isInsideGeofence(point, geofence[]) → gpsValid
+  └─ WiFi: isBssidWhitelisted(bssid, configs[]) → bssidMatch
+    ↓
+gpsValid OR bssidMatch OR ssidOnlyMatch → validationPassed
+    ↓
+calculateTrustScore({gps, wifi, device, mock_location})
+    ↓
+upsertDevice (auto-register) → check existing session
+    ↓
+$transaction: create/update session + create event
+    ↓
+if (!validationPassed) → 422 INVALID_LOCATION (event already logged)
+if (validationPassed) → 201 { session_id, trust_score, status }
+```
+
+### 4. File thay đổi
+
+**Schema & data:**
+| File | Thay đổi |
+|---|---|
+| `apps/api/prisma/schema.prisma` | +7 enums, +5 models (Employee, EmployeeBranchAssignment, EmployeeDevice, WorkScheduleAssignment, AttendanceSession, AttendanceEvent), back-relations on User/Branch/Department/WorkSchedule |
+| `apps/api/prisma/seed.ts` | Mở rộng từ 1 admin → 3 branches + 30 employees + manager + geofences/WiFi + schedule assignments + 1 trusted device |
+
+**Shared utils (pure functions, fully testable):**
+| File | Functions |
+|---|---|
+| `src/common/utils/geo.ts` | `haversineDistance()`, `isInsideGeofence()`, `distanceToGeofence()` |
+| `src/common/utils/wifi.ts` | `isBssidWhitelisted()`, `isSsidMatch()` |
+| `src/common/utils/trust-score.ts` | `calculateTrustScore()` — GPS tiers (+40/+25), BSSID (+35), SSID-only (+15), device trust (+15), mock (-50), poor accuracy (-15) |
+
+**Employees module (6 endpoints):**
+| File | Description |
+|---|---|
+| `src/modules/employees/employees.module.ts` | NestJS module |
+| `src/modules/employees/employees.controller.ts` | 6 routes with RBAC guards |
+| `src/modules/employees/employees.service.ts` | CRUD + assignments + device management, atomic User+Employee creation |
+| `src/modules/employees/dto/employee.dto.ts` | CreateEmployee, UpdateEmployee, CreateAssignment, ToggleDeviceTrust DTOs |
+| `src/modules/employees/dto/list-employees.dto.ts` | Pagination + filter (branch/dept/status/search) |
+
+**Attendance module (2 endpoints):**
+| File | Description |
+|---|---|
+| `src/modules/attendance/attendance.module.ts` | NestJS module |
+| `src/modules/attendance/attendance.controller.ts` | check-in (201), check-out (200) |
+| `src/modules/attendance/attendance.service.ts` | Full validation flow: GPS/WiFi → trust score → session management |
+| `src/modules/attendance/dto/check-in.dto.ts` | GPS coords, WiFi info, device fingerprint, mock location flag |
+
+**Wiring & updates:**
+| File | Thay đổi |
+|---|---|
+| `src/app.module.ts` | +EmployeesModule, +AttendanceModule |
+| `src/modules/auth/auth.service.ts` | `getMe()` giờ populate `employee` field từ Employee model thay vì hardcode `null` |
+
+**Tests (30 new):**
+| File | Tests |
+|---|---|
+| `src/common/utils/geo.spec.ts` | 9 tests — haversine, inside/outside/boundary geofence |
+| `src/common/utils/wifi.spec.ts` | 9 tests — BSSID case-insensitive, SSID, inactive, null |
+| `src/common/utils/trust-score.spec.ts` | 12 tests — all scoring rules, penalties, clamping, trust levels |
+
+### 5. Code review findings
+
+Đã review toàn bộ Sprint 2 code. Kết quả:
+
+| Category | Finding | Status |
+|---|---|---|
+| Security | Employees module vẫn dùng đúng `JwtAuthGuard` + `RolesGuard` + BranchScopeGuard pattern | ✅ |
+| Security | Attendance endpoints chỉ cho role `employee` | ✅ |
+| Data | Failed check-in attempts luôn được log trước khi throw | ✅ |
+| Data | Device auto-register dùng `upsert` atomic (no race condition) | ✅ |
+| Data | Session UNIQUE constraint (employeeId, workDate) chống duplicate | ✅ |
+| Data | Employee creation dùng `$transaction` atomic (User + Employee + Role) | ✅ |
+| Logic | Trust score clamp 0-100, trust level thresholds correct | ✅ |
+| Logic | Multi-branch scan tìm branch match tốt nhất (GPS ưu tiên, fallback WiFi) | ✅ |
+| Contract | AllExceptionsFilter đã handle 422 → `UNPROCESSABLE` code | ✅ |
+| Contract | DTOs có proper validation (`@IsUUID`, `@IsEmail`, `@Min`, `@Max`) | ✅ |
+
+**Không phát hiện critical/high issues.**
+
+### 6. Kết quả test
+
+```
+Test Suites: 7 passed, 7 total
+Tests:       64 passed, 64 total
+Time:        3.032s
+
+Build:       npx nest build → 0 errors
+```
+
+Breakdown:
+- **Day 1 tests (34):** auth.service 8, branches.service 14, roles.guard 5, branch-scope.guard 7
+- **Day 2 tests (30):** geo 9, wifi 9, trust-score 12
+
+### 7. Gì chưa làm (Day 3+ carry-over)
+
+- [ ] Run `prisma migrate dev` khi có DB running
+- [ ] Run seed mở rộng
+- [ ] E2E tests cho attendance (check-in valid/invalid/duplicate) — cần mocked attendance service
+- [ ] Unit test EmployeesService và AttendanceService (mocked Prisma)
+- [ ] Git: tạo feature branches, push, PRs — chờ user confirm workflow
+- [ ] Refactor shared utils sang `libs/shared/utils/` khi mobile cần
+
+---
+
+## Session #006 — 2026-04-16 — Day 3 Sprint: History, Dashboard, Seed & Audit
+
+### Prompt gốc
+
+> "Tiếp tục Sprint 3"
+
+### 1. Hành động
+- Phân tích `api-spec.md` cho các endpoint lịch sử và dashboard.
+- Phân tích `erd.md` để lấy model `DailyAttendanceSummary`.
+- Tạo implementation plan, update task.md checklist.
+- Cập nhật Prisma Schema:
+  - Thêm `DailyAttendanceSummary`.
+  - Thêm field `note` vào `AttendanceSession` cho manager override.
+  - Sửa lại back-relations.
+- Regen Prisma client.
+- Cập nhật `seed.ts` để sinh tự động lịch sử điểm danh 7 ngày cho 30 nhân viên (có xen lẫn `on_time`, `late`, `absent`, `missing_checkout` và `failed event`).
+- Viết API `AttendanceController` & `AttendanceService`:
+  - `GET /attendance/me`
+  - `GET /attendance/sessions` (có scope manager)
+  - `GET /attendance/sessions/:id`
+  - `PATCH /attendance/sessions/:id` (Manager override + tự tạo AuditLog trong transaction).
+- Viết API `DashboardController` & `DashboardService`:
+  - `GET /admin/overview` (aggregate numbers, top branches, checkin heatmap 24 slot).
+  - `GET /manager/:branchId` (branch today stats, low_trust list check, week trend).
+- Wiring `DashboardModule` vào `AppModule`.
+- Viết Unit Test cho `SessionService.override` (`attendance.service.spec.ts`) để đảm bảo logic override luôn ghi nhận audit.
+- Sửa lỗi Typo TypeScript ở `.sort()` function trong hàm dashboard.
+- Chạy formatter / compiler check, setup `reset-db.sh` và sửa `README.md`.
+
+### 2. Quyết định
+| # | Câu hỏi | Quyết định | Lý do |
+|---|---|---|---|
+| 1 | Mốc thời gian Heatmap | Dùng thuộc tính hour từ UTC + 7 (Giờ VN) | Cho ra view heatmap đơn giản mà không cầm full date lib (moment/date-fns) |
+| 2 | Phân tách Event Override | Ghi vào `note` dạng append `[Date] Override: x` và chèn `AuditLog` với `before/after` payload | Giữ `attendance_events` sạch chỉ cho thiết bị gửi, còn thay đổi admin thì track qua hệ audit để đảm bảo compliance. |
+
+### 3. Kết quả
+- Test API override pass tuyệt đối: `AttendanceService - overrideSession` tạo Audit Log và chặn Manager ngoài scope.
+- Type check: `npx nest build` Clean.
+- Docker flow sẵn sàng để start & dev.
+
+### 4. File thay đổi
+- `apps/api/prisma/schema.prisma` — +DailyAttendanceSummary, +note trên Session
+- `apps/api/prisma/seed.ts` — Thêm hàm seed 7 ngày
+- `apps/api/src/modules/attendance/dto/attendance-history.dto.ts` — Thêm DTO
+- `apps/api/src/modules/attendance/attendance.service.ts` — Code core query DB lớn
+- `apps/api/src/modules/attendance/attendance.controller.ts` — Expose logic cho HTTP
+- `apps/api/src/modules/attendance/attendance.service.spec.ts` — Mock Prisma & run JWT/Guard mock logic override test.
+- `apps/api/src/modules/dashboard/...` — Nest Resource cho Dashboard admin/manager
+- `scripts/reset-db.sh`, `README.md` — DX improvements
+
+### Follow-up Day 4
+- [ ] Chạy lệnh `docker compose up` và manual test endpoint API bằng cURL / Postman.
+- [ ] Run Cron/BullMQ cho Day 4 report & closing session.
+
