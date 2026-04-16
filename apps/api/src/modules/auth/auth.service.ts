@@ -83,24 +83,30 @@ export class AuthService {
       where: { id: userId },
       include: {
         userRoles: { include: { role: true } },
+        employee: {
+          include: {
+            primaryBranch: { select: { id: true, name: true } },
+            department: { select: { id: true, name: true } },
+          },
+        },
         managedBranches: {
           include: { branch: { select: { id: true, code: true, name: true } } },
         },
       },
     });
-    // `employee` filled in Day 2 once Employee model lands. Keep the key in the contract
-    // so portal/mobile can depend on shape stability.
     return {
       id: user.id,
       email: user.email,
       full_name: user.fullName,
       roles: user.userRoles.map((ur) => ur.role.code),
-      employee: null as null | {
-        id: string;
-        employee_code: string;
-        primary_branch: { id: string; name: string };
-        department: { id: string; name: string } | null;
-      },
+      employee: user.employee
+        ? {
+            id: user.employee.id,
+            employee_code: user.employee.employeeCode,
+            primary_branch: user.employee.primaryBranch,
+            department: user.employee.department,
+          }
+        : null,
       managed_branches: user.managedBranches.map((mb) => mb.branch),
     };
   }
