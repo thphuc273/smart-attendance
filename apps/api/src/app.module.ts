@@ -12,6 +12,7 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     DashboardModule,
     QueueModule,
     ReportsModule,
+    WorkSchedulesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
