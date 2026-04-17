@@ -29,7 +29,7 @@ async function bootstrap() {
       return cb(new Error(`Origin ${origin} not allowed`));
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
   // No-store on every auth path — prevent intermediary/browser caching of tokens.
