@@ -38,6 +38,11 @@ interface CheckInResp {
   };
 }
 
+/** Returns 'YYYY-MM-DD' for the given Date in Asia/Ho_Chi_Minh (UTC+7). */
+function vnDateString(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(d);
+}
+
 function getDeviceFingerprint(): string {
   const key = 'device_fingerprint';
   let fp = localStorage.getItem(key);
@@ -77,8 +82,8 @@ export default function CheckinPage() {
       const api = getApi();
       const resp = await api.get('attendance/me?limit=14').json<HistoryResp>();
       setHistory(resp.data);
-      const todayISO = new Date().toISOString().slice(0, 10);
-      setToday(resp.data.find((s) => s.workDate.slice(0, 10) === todayISO) ?? null);
+      const todayVN = vnDateString(new Date());
+      setToday(resp.data.find((s) => vnDateString(new Date(s.workDate)) === todayVN) ?? null);
     } catch (e) {
       setMessage({ kind: 'err', text: (e as Error).message });
     }
@@ -320,7 +325,7 @@ export default function CheckinPage() {
                       className="border-b border-slate-50 last:border-0 transition-colors hover:bg-slate-50/60"
                     >
                       <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                        {s.workDate.slice(0, 10)}
+                        {vnDateString(new Date(s.workDate))}
                       </td>
                       <td className="px-4 py-3">
                         <StatusPill status={s.status} />

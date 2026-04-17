@@ -26,6 +26,17 @@ import { ScheduleService } from './schedule.service';
 const IMPOSSIBLE_TRAVEL_KMH = 120;
 const IMPOSSIBLE_TRAVEL_LOOKBACK_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Work-date = calendar day in VN (UTC+7), encoded as UTC-midnight Date.
+ * Stored into Postgres @db.Date (strips time). Keeps DB day consistent
+ * regardless of server TZ (Docker UTC, Mac local, etc).
+ */
+function todayInVN(): Date {
+  const nowMs = Date.now() + 7 * 3600 * 1000;
+  const vn = new Date(nowMs);
+  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate()));
+}
+
 @Injectable()
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
@@ -191,10 +202,8 @@ export class AttendanceService {
     // 7. Validation: reject if both GPS and WiFi fail
     const validationPassed = gpsValid || bssidMatch || ssidOnlyMatch;
 
-    // 8. Check for existing session today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const workDate = today;
+    // 8. Check for existing session today (VN calendar day)
+    const workDate = todayInVN();
 
     const existingSession = await this.prisma.attendanceSession.findUnique({
       where: {
@@ -348,13 +357,12 @@ export class AttendanceService {
       });
     }
 
-    // 2. Find today's session
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // 2. Find today's session (VN calendar day)
+    const workDate = todayInVN();
 
     const session = await this.prisma.attendanceSession.findUnique({
       where: {
-        employeeId_workDate: { employeeId: employee.id, workDate: today },
+        employeeId_workDate: { employeeId: employee.id, workDate },
       },
     });
 
