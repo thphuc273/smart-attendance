@@ -795,4 +795,87 @@ apps/mobile: không thay đổi
 - [ ] Admin cần 1 nút "Toggle device is_trusted" trong UI employee detail — hiện chỉ có API, chưa UI
 - [ ] E2E test cho flow employee web check-in → history rendering — cần Testcontainers + Playwright
 
+---
+
+## Session #009 — 2026-04-17 — PO feature audit cleanup (Sprint 1–4 backfill)
+
+### Prompt gốc
+
+> User paste toàn bộ bảng PO audit đối chiếu feature vs spec:
+> - P0 (Critical): Mobile check-in, Portal Employees page, Work Schedules
+> - P1 (Important): Audit Logs page, session detail mobile, employee detail page, trust badge, rate-limit headers, monthly summary
+> - "bổ sung các feature còn thiếu của sprint 1,2,3,4 dựa vào bảng audit trên, review và test lại, sau đó bổ sung lại vào prompt log và sprintplan nếu cần"
+
+Audit phát hiện nhiều gap tích lũy từ Sprint 1–3: các checkbox UI trong sprint-plan đã ✅ về tổng thể nhưng khi đối chiếu spec §4, §8, §9 có 3 module lớn hoàn toàn thiếu.
+
+### 1. Quyết định thực thi
+
+| # | Câu hỏi | Quyết định |
+|---|---|---|
+| 1 | Làm hết trong 1 PR hay stack nhiều? | 4 PRs stacked — mỗi PR ~1 feature module để review dễ |
+| 2 | Thứ tự ưu tiên | P0 → P1. E (employees) → F (schedules) → G (audit+polish) → H (mobile) |
+| 3 | Rate-limit headers (audit #8) có cần code? | Không — throttler v6.5 auto emit `X-RateLimit-*`. Verify bằng đọc node_modules thay vì viết thêm |
+| 4 | Trust badge sessions (audit #7) | Đã ship từ PR #21 — note trong commit, không lặp |
+| 5 | Tests cho new API modules | Viết service-level tests mock Prisma (tuân pattern #16/#17): 8 tests work-schedules, 4 tests audit-logs |
+| 6 | Mobile check-in — cần WiFi BSSID? | Skip BSSID (cần native module tùy biến qua `expo-network`). Stick GPS-only + device fingerprint + is_mock_location. Đủ cho employee demo ở Sprint 4. WiFi collection defer Day 5 zero-tap. |
+| 7 | Portal Employees — trang detail riêng hay drawer? | Drawer — nhanh hơn, đủ xem/sửa + devices + assignments. Full page là overkill cho 5-day scope |
+| 8 | Mobile — primary landing sau login | Đổi `/history` → `/checkin`. Employee dùng check-in hằng ngày, lịch sử là tab phụ |
+
+### 2. 4 PRs đã mở
+
+| PR | Branch | Scope | Files | Tests |
+|---|---|---|---|---|
+| #22 | `feature/employees-ui` | Portal /employees (list + create + drawer với edit + devices + assignments) | 2 files, +762 | — (UI) |
+| #23 | `feature/work-schedules` | API module mới (5 endpoints) + portal /schedules (card grid + create modal + assignments drawer) | 8 files, +871 | +8 |
+| #24 | `feature/audit-logs-polish` | API GET /audit-logs + portal /audit-logs với diff viewer + /checkin monthly summary widget | 9 files, +487 | +4 |
+| #25 | `feature/mobile-checkin` | Mobile /checkin với expo-location + expo-device, /session/[id] detail screen | 8 files, +676 | — (manual QA on device) |
+
+### 3. Gì KHÔNG làm và tại sao
+
+- **Realtime dashboard polling/websocket** (💡 suggest): bỏ qua. Demo chỉ cần manual refresh. Polling 60s khiến server bị load khi nhiều tab. Defer.
+- **Map preview geofence** (💡 suggest): bỏ qua. Leaflet/Google Maps dep lớn + không ai verify lat/lng bằng map được trong 5-day. Khả năng xem bán kính OK với text lat/lng + radius number.
+- **Notification manager về missing_checkout** (sprint §4.4): defer. Cần BullMQ job mới + email/push service mới. Out of scope Sprint 4 (Day 5 zero-tap + notification).
+- **Employee xem work schedule của mình**: defer. Small gap, có thể add vào `/checkin` sau.
+
+### 4. Sai lầm nhỏ (Session #009)
+
+**Sai lầm 13: `StyleSheet` function property (lặp từ Session #007)**
+- Trong mobile check-in, không thêm function style nữa — lần trước đã học. Nhưng vẫn gặp React Fragment + React 19 types issue ở audit-logs page (Fragment ExoticComponent not assignable to JSX).
+- Fix: dùng `flatMap` trả mảng tr → tr thay vì nested Fragment. Pattern đơn giản hơn + TS friendly.
+
+**Sai lầm 14: Rate-limit headers ngộ nhận**
+- Audit báo "rate-limit headers missing". Mình suýt viết custom middleware set `X-RateLimit-*` → grep `node_modules/@nestjs/throttler` trước → phát hiện `headerPrefix = 'X-RateLimit'` trong guard source. Khẳng định đã có → 0 LOC thay vì viết middleware không cần.
+- Bài học: Trước khi code fix cho lib behavior, grep source lib để confirm current state.
+
+### 5. Kết quả tổng thể
+
+```
+apps/api:    130/130 tests pass (+12 new); tsc clean; nest build xanh
+apps/portal: tsc clean; 10 routes (+3 mới: /employees, /schedules, /audit-logs)
+apps/mobile: tsc clean; 5 screens (+2 mới: /checkin, /session/[id])
+```
+
+### 6. Snapshot feature count sau cleanup
+
+| Sprint | Feature count claim-ed Session trước | Audit phát hiện missing | Audit close-ed |
+|---|---|---|---|
+| 1 (Foundation + Branches) | 8 ✅ | 0 | 0 |
+| 2 (Employees + Check-in) | ~12 ✅ | 4 (portal employees UI, mobile check-in, device toggle UI, secondary assignment UI) | 4 |
+| 3 (History + Dashboard) | ~8 ✅ | 2 (monthly summary, mobile session detail) | 2 |
+| 4 (Reports + Cron) | ~18 ✅ | 3 (work-schedules module, audit-logs, trust badge) | 3 (trust badge đã có) |
+| **Totals** | 46 | 9 | 9 |
+
+### 7. Prompts đáng học
+
+- **PO audit table** như user paste: format `feature | spec ref | status | note` với ✅/🟡/❌/💡 — đây là prompt format tốt nhất để điểm lại đặc tả vs implementation. Từ đó mình có thể plan bằng bảng tương tự thay vì prose.
+- **Check lib behavior trước khi code fix**: `grep node_modules/<lib>/dist/*.js` cho feature flag/env/header name — tiết kiệm 30+ LOC custom middleware cho throttler.
+
+### 8. Follow-up cho Day 5
+
+- [ ] Rebase + squash-merge 4 PRs này theo thứ tự #22 → #23 → #24 → #25 vào develop
+- [ ] `PaginatedResult<T>` interceptor doc-comment (follow-up nợ từ Session #008)
+- [ ] Zero-tap (sprint §5) — backend + mobile + portal — 1 ngày + testing
+- [ ] E2E test flow employee web check-in → override → CSV export — cần Testcontainers
+- [ ] Thêm seed data work-schedules để demo `/schedules` không rỗng sau reset-db
+
 

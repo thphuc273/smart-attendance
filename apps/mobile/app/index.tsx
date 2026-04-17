@@ -10,7 +10,7 @@ export default function Index() {
     (async () => {
       // expo-router generates typed routes via `expo start`; cast until first run.
       if (await hasToken()) {
-        router.replace('/history' as never);
+        router.replace('/checkin' as never);
       } else {
         router.replace('/login' as never);
       }

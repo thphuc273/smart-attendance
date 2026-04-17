@@ -1,5 +1,7 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+const DATE_ONLY_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 export class CreateEmployeeDto {
   @ApiProperty({ example: 'new@demo.com' })
@@ -80,12 +82,13 @@ export class CreateAssignmentDto {
 
   @ApiProperty({ example: '2026-04-15' })
   @IsString()
-  @IsNotEmpty()
+  @Matches(DATE_ONLY_REGEX, { message: 'effective_from must be YYYY-MM-DD' })
   effective_from!: string;
 
   @ApiPropertyOptional({ example: '2026-05-15' })
   @IsOptional()
   @IsString()
+  @Matches(DATE_ONLY_REGEX, { message: 'effective_to must be YYYY-MM-DD' })
   effective_to?: string;
 }
 

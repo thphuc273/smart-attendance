@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { parseDateOnly } from '../../common/utils/date-only';
 import { AssignScheduleDto, CreateWorkScheduleDto } from './dto/work-schedule.dto';
 
 @Injectable()
@@ -50,8 +51,8 @@ export class WorkSchedulesService {
     const employee = await this.prisma.employee.findUnique({ where: { id: dto.employee_id } });
     if (!employee) throw new NotFoundException('Employee not found');
 
-    const effectiveFrom = new Date(dto.effective_from);
-    const effectiveTo = dto.effective_to ? new Date(dto.effective_to) : null;
+    const effectiveFrom = parseDateOnly(dto.effective_from, 'effective_from');
+    const effectiveTo = dto.effective_to ? parseDateOnly(dto.effective_to, 'effective_to') : null;
 
     if (effectiveTo && effectiveTo < effectiveFrom) {
       throw new ConflictException({
