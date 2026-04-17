@@ -120,4 +120,56 @@ describe('calculateTrustScore', () => {
     expect(result.score).toBe(40); // 25 + 15
     expect(result.trustLevel).toBe('review');
   });
+
+  it('should penalize impossible travel with -30 and flag', () => {
+    const result = calculateTrustScore({
+      ...baseInput,
+      gpsValid: true,
+      accuracyMeters: 10,
+      bssidMatch: true,
+      impossibleTravel: true,
+    });
+    expect(result.score).toBe(45); // 40 + 35 - 30
+    expect(result.flags).toContain('impossible_travel');
+  });
+
+  it('should penalize VPN suspected with -10 and flag', () => {
+    const result = calculateTrustScore({
+      ...baseInput,
+      gpsValid: true,
+      accuracyMeters: 10,
+      bssidMatch: true,
+      vpnSuspected: true,
+    });
+    expect(result.score).toBe(65); // 40 + 35 - 10
+    expect(result.flags).toContain('vpn_suspected');
+  });
+
+  it('should stack impossible_travel + vpn + mock penalties', () => {
+    const result = calculateTrustScore({
+      ...baseInput,
+      gpsValid: true,
+      accuracyMeters: 10,
+      bssidMatch: true,
+      impossibleTravel: true,
+      vpnSuspected: true,
+      isMockLocation: true,
+    });
+    expect(result.score).toBe(0); // 40 + 35 - 30 - 10 - 50, clamped
+    expect(result.flags).toEqual(
+      expect.arrayContaining(['impossible_travel', 'vpn_suspected', 'mock_location_detected']),
+    );
+    expect(result.trustLevel).toBe('suspicious');
+  });
+
+  it('should not flag impossible_travel when flag is false/undefined', () => {
+    const result = calculateTrustScore({
+      ...baseInput,
+      gpsValid: true,
+      accuracyMeters: 10,
+      bssidMatch: true,
+    });
+    expect(result.flags).not.toContain('impossible_travel');
+    expect(result.flags).not.toContain('vpn_suspected');
+  });
 });

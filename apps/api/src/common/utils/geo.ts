@@ -64,3 +64,19 @@ export function distanceToGeofence(point: GeoPoint, geofence: Geofence): number 
     geofence.centerLng,
   );
 }
+
+/**
+ * Calculate ground speed between two timestamped positions.
+ * Returns Infinity if time delta is zero or negative (treat as implausible).
+ */
+export function haversineSpeedKmh(
+  prev: { latitude: number; longitude: number; at: Date },
+  curr: { latitude: number; longitude: number; at: Date },
+): number {
+  const deltaMs = curr.at.getTime() - prev.at.getTime();
+  if (deltaMs <= 0) return Infinity;
+
+  const meters = haversineDistance(prev.latitude, prev.longitude, curr.latitude, curr.longitude);
+  const hours = deltaMs / 3_600_000;
+  return meters / 1000 / hours;
+}

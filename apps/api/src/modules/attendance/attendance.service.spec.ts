@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
+import { ScheduleService } from './schedule.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('AttendanceService - overrideSession', () => {
@@ -28,6 +29,15 @@ describe('AttendanceService - overrideSession', () => {
       providers: [
         AttendanceService,
         { provide: PrismaService, useValue: prisma },
+        {
+          provide: ScheduleService,
+          useValue: {
+            resolveSchedule: jest.fn().mockResolvedValue(null),
+            classifyCheckIn: jest.fn(),
+            classifyCheckOut: jest.fn(),
+            isWorkday: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

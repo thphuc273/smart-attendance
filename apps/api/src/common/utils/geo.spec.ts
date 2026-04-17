@@ -1,4 +1,9 @@
-import { haversineDistance, isInsideGeofence, distanceToGeofence } from './geo';
+import {
+  haversineDistance,
+  haversineSpeedKmh,
+  isInsideGeofence,
+  distanceToGeofence,
+} from './geo';
 
 describe('geo utilities', () => {
   // HCM-Q1 center: 10.7769, 106.7009
@@ -53,6 +58,39 @@ describe('geo utilities', () => {
     it('should return positive distance for any other point', () => {
       const dist = distanceToGeofence({ latitude: 10.78, longitude: 106.7009 }, geofence);
       expect(dist).toBeGreaterThan(0);
+    });
+  });
+
+  describe('haversineSpeedKmh', () => {
+    const hcm = { latitude: 10.7769, longitude: 106.7009 };
+    const hanoi = { latitude: 21.0285, longitude: 105.8542 };
+
+    it('returns Infinity when time delta is zero or negative', () => {
+      const t = new Date('2026-04-16T08:00:00Z');
+      const speed = haversineSpeedKmh({ ...hcm, at: t }, { ...hanoi, at: t });
+      expect(speed).toBe(Infinity);
+    });
+
+    it('returns reasonable speed for ~1000km in 10h (~100 km/h)', () => {
+      const prev = { ...hcm, at: new Date('2026-04-16T00:00:00Z') };
+      const curr = { ...hanoi, at: new Date('2026-04-16T10:00:00Z') };
+      const speed = haversineSpeedKmh(prev, curr);
+      expect(speed).toBeGreaterThan(80);
+      expect(speed).toBeLessThan(140);
+    });
+
+    it('flags impossible travel for same 1000km in 1h (~1000 km/h)', () => {
+      const prev = { ...hcm, at: new Date('2026-04-16T08:00:00Z') };
+      const curr = { ...hanoi, at: new Date('2026-04-16T09:00:00Z') };
+      const speed = haversineSpeedKmh(prev, curr);
+      expect(speed).toBeGreaterThan(500);
+    });
+
+    it('returns near-zero for stationary across time', () => {
+      const prev = { ...hcm, at: new Date('2026-04-16T08:00:00Z') };
+      const curr = { ...hcm, at: new Date('2026-04-16T09:00:00Z') };
+      const speed = haversineSpeedKmh(prev, curr);
+      expect(speed).toBeLessThan(0.01);
     });
   });
 });
