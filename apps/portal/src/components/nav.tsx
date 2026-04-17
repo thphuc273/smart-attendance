@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -43,11 +44,16 @@ export function TopNav() {
     <header className="sticky top-0 z-20 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-8">
-          <Link href={homeHref} className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 via-violet-500 to-pink-500 text-sm font-bold text-white shadow-sm">
-              SA
-            </span>
-            <span className="text-sm font-semibold tracking-tight text-slate-900">
+          <Link href={homeHref} className="flex items-center gap-3">
+            <Image
+              src="/finos-logo.png"
+              alt="FinOS"
+              width={96}
+              height={30}
+              priority
+              className="h-7 w-auto"
+            />
+            <span className="hidden border-l border-slate-200 pl-3 text-sm font-semibold tracking-tight text-slate-900 sm:inline">
               Smart Attendance
             </span>
           </Link>

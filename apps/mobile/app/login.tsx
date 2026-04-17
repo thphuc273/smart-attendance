@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useForm, Controller } from 'react-hook-form';
@@ -47,6 +47,12 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
+      <Image
+        source={require('../assets/finos-logo.png')}
+        style={styles.logo}
+        resizeMode="contain"
+      />
+      <Text style={styles.subtitle}>Smart Attendance</Text>
       <Text style={styles.title}>Đăng nhập</Text>
       <Controller
         control={control}
@@ -92,7 +98,9 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 24, justifyContent: 'center', backgroundColor: '#f8fafc' },
-  title: { fontSize: 24, fontWeight: '700', marginBottom: 16 },
+  logo: { width: 160, height: 50, alignSelf: 'center', marginBottom: 8 },
+  subtitle: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 24 },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
   input: {
     borderWidth: 1,
     borderColor: '#cbd5e1',

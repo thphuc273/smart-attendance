@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -54,9 +55,14 @@ export default function LoginPage() {
 
       <div className="relative w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 via-violet-500 to-pink-500 shadow-lg">
-            <span className="text-xl font-bold text-white">SA</span>
-          </div>
+          <Image
+            src="/finos-logo.png"
+            alt="FinOS"
+            width={160}
+            height={50}
+            priority
+            className="mx-auto mb-5 h-12 w-auto"
+          />
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Smart Attendance</h1>
           <p className="mt-1 text-sm text-slate-500">Đăng nhập để tiếp tục</p>
         </div>
