@@ -156,42 +156,74 @@
 **Mục tiêu:** Chất lượng nghiệp vụ + báo cáo + dashboard manager.
 **DoD:** Export CSV tháng 4 cho 1 branch; cron 00:30 chạy tự động tạo summary.
 
+> **Trạng thái (2026-04-16):** Day 4 hoàn thành — 4 stacked PRs (#18, #19, #20, #21) mở trên `develop`. Backend: 118/118 unit tests pass, `tsc --noEmit` clean, `nest build` xanh. Portal + mobile: typecheck clean, `next build` xanh.
+
 ### 4.1 Database (Prisma migration #4)
-- [ ] Thêm cột cần thiết (nếu chưa có) cho overtime/late minutes trên `attendance_sessions`
-- [ ] Index bổ sung: `attendance_events (status, created_at)` cho anomaly query
+- [x] Thêm cột `late_minutes` vào `attendance_sessions` (PR #18) — `overtime_minutes` đã có từ Day 2
+- [x] Thêm bảng `report_exports` cho CSV export job state (PR #19)
+- [x] Index `attendance_events (status, created_at)` (đã có từ Day 2 schema)
 
 ### 4.2 Logic nghiệp vụ
-- [ ] `trust-score.ts` đủ 10 rule (bảng §5.2 spec): GPS accuracy tier, BSSID/SSID, trusted device, mock_location, impossible_travel, VPN
-- [ ] `ScheduleService`: xác định ca hiện tại từ `work_schedule_assignments`
-- [ ] Phân loại status: `on_time | late | early_leave | overtime | missing_checkout`
-- [ ] BullMQ jobs:
-  - [ ] `missing-checkout-close` (cron 23:59)
-  - [ ] `daily-summary` (cron 00:30, idempotent upsert)
-  - [ ] `report-export` (on-demand)
+- [x] `trust-score.ts` đủ 10 rule (PR #18): thêm `impossible_travel` (-30) + `vpn_suspected` (-10) — VPN input hiện trả `false` từ service, sẵn sàng wire khi GeoIP module bổ sung
+- [x] `ScheduleService` (PR #18): resolve ca hiện tại từ `work_schedule_assignments` + pure classifier (`classifyCheckIn` / `classifyCheckOut` / `isWorkday`)
+- [x] Phân loại status đủ 4 nhóm: `on_time | late | early_leave | overtime` (PR #18). `missing_checkout` do cron BullMQ §4.2 đảm nhận
+- [x] BullMQ jobs (PR #19):
+  - [x] `missing-checkout-close` (cron `59 23 * * *`, idempotent — `updateMany` loại trừ `missing_checkout` đã đóng)
+  - [x] `daily-summary` (cron `30 0 * * *`, idempotent upsert vào `daily_attendance_summaries`)
+  - [x] `report-export` (on-demand, attempts=3, exponential backoff)
 
 ### 4.3 API endpoints (`docs/api-spec.md` §6, §7)
-- [ ] `GET /reports/daily-summary` (filter branch/dept/date)
-- [ ] `GET /reports/branch/:id` (aggregate period)
-- [ ] `POST /reports/export` → trả `job_id` (202)
-- [ ] `GET /reports/export/:jobId` (status + download_url)
-- [ ] `GET /reports/export/:jobId/download` (stream CSV)
-- [ ] `GET /dashboard/manager/:branchId` (today stats + low_trust_today + week_trend)
-- [ ] Rate limit `/reports/export`: 3/phút/user
+- [x] `GET /reports/daily-summary` (filter branch/dept/date) — PR #19
+- [x] `GET /reports/branch/:id` (aggregate period + status breakdown) — PR #19
+- [x] `POST /reports/export` → 202 + `job_id` — PR #19
+- [x] `GET /reports/export/:jobId` (status + download_url) — PR #19
+- [x] `GET /reports/export/:jobId/download` (CSV + UTF-8 BOM) — PR #19
+- [x] `GET /dashboard/manager/:branchId` (today stats + low_trust_today + week_trend) — đã có từ #17
+- [x] `GET /dashboard/anomalies` (branches_late_spike + employees_low_trust + new untrusted devices) — PR #20 (spec sprint-plan §5.2 — kéo sớm Day 4)
+- [x] Rate limit `POST /reports/export`: 3/phút/user (PR #19, dùng `@nestjs/throttler` scope riêng)
+- [x] Manager branch-scope enforced ở mọi endpoint mới
 
 ### 4.4 UI
-- [ ] **Portal — Manager Dashboard:** stat cards today, list low-trust sessions (click → modal override), week trend chart
-- [ ] **Portal — Reports page:** form filter → gọi export → polling status → download
-- [ ] **Mobile:** hiển thị overtime minutes + late warning trên lịch sử
+- [x] **Portal — Dashboard** (`/dashboard`): stat cards (employees/branches/today/on-time rate), status breakdown, top branches on-time & late, 24h heatmap, **Anomaly cards** (late spikes + low-trust employees + new untrusted devices). Admin sees overview; manager sees anomalies scoped to their branches — PR #21
+- [x] **Portal — Sessions** (`/sessions`): filterable table (status, date range) với pagination + **Override modal** (note ≥3 ký tự, ghi audit log) — PR #21
+- [x] **Portal — Reports** (`/reports`): daily summary table + form filter + **CSV export** (enqueue BullMQ → poll mỗi 1.2s → download blob) — PR #21
+- [x] **Portal — Branches** (`/branches`): CRUD đầy đủ + WiFi whitelist + geofence (thay Day 1 stub) — PR #21
+- [x] **Portal — Check-in** (`/checkin` cho employee role): GPS-based web check-in với device fingerprint + trust score display — PR #21
+- [x] **Portal — Employees** (`/employees`): list + create + detail drawer với edit, devices toggle trust, branch assignments — PR #22
+- [x] **Portal — Schedules** (`/schedules`): card grid + create modal + assignments drawer — PR #23
+- [x] **Portal — Audit logs** (`/audit-logs`): filterable table với expandable before/after JSON diff — PR #24
+- [x] **Portal — Monthly summary** trên `/checkin`: 8 stat tiles (on-time/late/absent/missing/total worked/OT/late/days) — PR #24
+- [x] **Mobile — History** (`/history`): list sessions với late/overtime badges, trust-score color-coded, pull-to-refresh, tap → session detail — PR #21 + PR #25
+- [x] **Mobile — Check-in** (`/checkin`): GPS + device fingerprint + trust result display (expo-location + expo-device) — PR #25
+- [x] **Mobile — Session detail** (`/session/[id]`): session meta + events timeline với validation method, GPS, WiFi, risk flags — PR #25
+- [x] Auth layer chung: portal `useRequireAuth` + ky client với Bearer + 401 redirect; mobile `expo-secure-store` + typed env — PR #21
 
 ### 4.5 Test
-- [ ] Unit: trust-score từng rule (10 case), schedule resolver
-- [ ] Unit: CSV formatter đúng format BOM + Vietnamese UTF-8
-- [ ] E2E: cron daily-summary idempotent (chạy 2 lần không nhân đôi)
-- [ ] E2E: missing-checkout close session còn mở
+- [x] Unit: trust-score 15 test (bao gồm 2 rule mới + combined penalties) — PR #18
+- [x] Unit: schedule classifier 12 test (grace boundary, early_leave, overtime, workday) — PR #18
+- [x] Unit: ScheduleService resolver (3 test, bao gồm malformed workdays JSON) — PR #18
+- [x] Unit: `haversineSpeedKmh` (4 test, bao gồm impossible travel) — PR #18
+- [x] Unit: `daily-summary` processor idempotent (3 test) — PR #19
+- [x] Unit: `missing-checkout` processor (2 test, idempotent check) — PR #19
+- [x] Unit: `report-export` processor CSV format + BOM + failure branch (2 test) — PR #19
+- [x] Unit: `ReportsService` scope + expiry + ownership (7 test) — PR #19
+- [x] Unit: `DashboardService` anomaly detection + heatmap bigint coercion (6 test) — PR #20
+- [ ] E2E: cron `daily-summary` idempotent (cần Postgres+Redis đang chạy) — deferred, có thể chạy tay qua seed + queue test
+- [ ] E2E: `missing-checkout` đóng session mở — deferred (cần fixtures)
 
 ### 4.6 End-of-day
-- [ ] PR `feature/day4-reports-cron` → `develop`
-- [ ] `PROMPT_LOG.md` Session #006: prompt full trust-score, prompt BullMQ job scaffold, prompt CSV streaming — ghi điểm chỉnh sửa
+- [x] 8 PR stacked lên `develop`:
+  - [#18](https://github.com/thphuc273/smart-attendance/pull/18) `feature/trust-score-schedule` — foundation
+  - [#19](https://github.com/thphuc273/smart-attendance/pull/19) `feature/reports-bullmq` — BullMQ + CSV export
+  - [#20](https://github.com/thphuc273/smart-attendance/pull/20) `feature/dashboard-manager-anomalies` — anomalies + heatmap read-model
+  - [#21](https://github.com/thphuc273/smart-attendance/pull/21) `feature/sprint4-ui` — portal dashboard/sessions/reports/branches/checkin + mobile history
+  - [#22](https://github.com/thphuc273/smart-attendance/pull/22) `feature/employees-ui` — portal /employees với device + assignments
+  - [#23](https://github.com/thphuc273/smart-attendance/pull/23) `feature/work-schedules` — API module + portal /schedules
+  - [#24](https://github.com/thphuc273/smart-attendance/pull/24) `feature/audit-logs-polish` — audit API/UI + monthly summary
+  - [#25](https://github.com/thphuc273/smart-attendance/pull/25) `feature/mobile-checkin` — mobile check-in + session detail
+- [x] 130/130 unit tests pass · api `tsc --noEmit` clean · `nest build` xanh
+- [x] Portal + mobile `tsc --noEmit` clean · `next build` xanh
+- [x] PO feature audit: tất cả P0 + P1 đã closed (trừ zero-tap P2 Day 5 scope)
 
 ---
 

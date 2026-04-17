@@ -181,9 +181,15 @@ Nếu **cả hai đều thỏa** → `validation_method = gps_wifi` → trust sc
 - `40 ≤ score < 70` → vàng (review)
 - `score < 40` → đỏ (suspicious, flag cho manager)
 
+**Hiển thị trust score:**
+- Chỉ expose cho role `admin` và `manager` (trang `/sessions`, `/dashboard` anomalies, `/audit-logs`)
+- **KHÔNG** hiển thị ở UI employee (trang `/checkin`) — tránh user tự tối ưu trust để bypass
+
 ### 5.3 Ca làm & trạng thái ngày
 
 **Ca mặc định:** 08:00–17:00, T2–T6, grace 10 phút, overtime sau 18:00.
+
+**Timezone:** `workDate` của session luôn là ngày theo lịch Việt Nam (`Asia/Ho_Chi_Minh`, UTC+7), không phụ thuộc TZ của server/container. Backend và frontend đều convert về VN tz trước khi so sánh — tránh session biến mất nếu user check-in vào buổi tối cross-midnight UTC.
 
 | Status | Điều kiện |
 |---|---|
@@ -199,12 +205,20 @@ Nếu **cả hai đều thỏa** → `validation_method = gps_wifi` → trust sc
 - Mỗi nhân viên có **1 `primary_branch_id`**
 - Bảng `employee_branch_assignments` hỗ trợ `primary | secondary | temporary` với `effective_from/to`
 - Check-in tại chi nhánh nào → hệ thống tự match theo vị trí; nếu khớp geofence của secondary branch đang active → vẫn valid
+- **Geofence chi nhánh:** `Branch.latitude/longitude/radius_meters` là **implicit default geofence**. Các bản ghi `branch_geofences` là *bổ sung* (dùng cho toà nhà nhiều cổng vào). Chi nhánh mới tạo không cần thêm `branch_geofences` row vẫn check-in được.
 
-### 5.5 Check-in nhiều lần/ngày
+**Phân quyền quản lý nhân viên:**
+- `admin`: toàn quyền CRUD + đổi role
+- `manager`: CRUD **chỉ trong scope `managed_branch_ids`**, chỉ tạo được role `employee`. Thăng cấp user → manager/admin → reject `ROLE_ESCALATION_BLOCKED`
+- Delete = soft delete (`employment_status = terminated`, `user.status = inactive`). Lịch sử chấm công giữ nguyên
 
-- Mỗi ngày **1 `attendance_session`** chính/employee/branch
+### 5.5 Check-in / Check-out rules
+
+- Mỗi ngày **1 `attendance_session`** chính/employee/branch (UNIQUE `(employee_id, work_date)`)
 - Mọi attempt đều log `attendance_events` (kể cả failed)
-- Check-in lần 2 trong cùng session → update `check_in_at` nếu lần đầu là fail, hoặc ignore nếu đã success
+- **Check-in immutable:** khi session đã có `check_in_at` non-null, check-in lần 2 → reject `ALREADY_CHECKED_IN`. Check-in lần đầu fail (validation) có thể retry vì `check_in_at` còn null
+- **Check-out có thể update nhiều lần trong ngày:** mỗi lần update `check_out_at` (latest wins), mọi attempt vẫn log vào `attendance_events`. Manager có thể xem full timeline qua session detail
+- **UI button state:** Check-in button disable vĩnh viễn sau khi đã check-in thành công; Check-out button luôn mở lại sau khi đã check-in (kể cả đã check-out) để cho phép update
 
 ### 5.6 Zero-tap rules
 

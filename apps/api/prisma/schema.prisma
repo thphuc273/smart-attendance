@@ -1,0 +1,543 @@
+// Smart Attendance — Prisma schema
+// Day 1: Identity + Organization + Location config + Schedule + Audit.
+// Day 2: Employee, EmployeeBranchAssignment, EmployeeDevice, WorkScheduleAssignment, AttendanceSession, AttendanceEvent.
+// Day 3: DailyAttendanceSummary.
+// Day 5: BranchZeroTapPolicy + BranchQrSecret + zero-tap columns on EmployeeDevice,
+//        trigger/nonce/wifi_scan/attestation on AttendanceEvent,
+//        qr_token_used_at on AttendanceSession.
+//
+// Source of truth: docs/erd.md v0.4 (face verification dropped from MVP)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================= ENUMS =============================
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
+enum RoleCode {
+  admin
+  manager
+  employee
+}
+
+enum BranchStatus {
+  active
+  inactive
+}
+
+enum EmploymentStatus {
+  active
+  on_leave
+  terminated
+}
+
+enum AssignmentType {
+  primary
+  secondary
+  temporary
+}
+
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
+enum AttendanceEventType {
+  check_in
+  check_out
+}
+
+enum AttendanceEventStatus {
+  success
+  failed
+}
+
+enum AttendanceSessionStatus {
+  on_time
+  late
+  early_leave
+  overtime
+  missing_checkout
+  absent
+}
+
+enum ValidationMethod {
+  gps
+  wifi
+  gps_wifi
+  qr
+  none
+}
+
+enum AttendanceTrigger {
+  manual
+  zero_tap
+  qr_kiosk
+}
+
+enum ZeroTapRevokeReason {
+  user_opt_out
+  mock_location_detected
+  admin_disabled
+  attestation_failed
+  branch_disabled
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  override
+  login
+  logout
+}
+
+enum NotificationType {
+  missing_checkout
+  override
+  late_warning
+  generic
+}
+
+// ============================= IDENTITY =============================
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  fullName     String     @map("full_name")
+  phone        String?
+  status       UserStatus @default(active)
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  employee        Employee?
+  userRoles       UserRole[]
+  auditLogs       AuditLog[]
+  managedBranches ManagerBranch[]
+  notifications   Notification[]
+
+  @@index([status])
+  @@map("users")
+}
+
+model Role {
+  id        String     @id @default(uuid()) @db.Uuid
+  code      RoleCode   @unique
+  name      String
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ============================= ORGANIZATION =============================
+
+model Branch {
+  id           String       @id @default(uuid()) @db.Uuid
+  code         String       @unique
+  name         String
+  address      String?
+  latitude     Decimal      @db.Decimal(10, 7)
+  longitude    Decimal      @db.Decimal(10, 7)
+  radiusMeters Int          @default(150) @map("radius_meters")
+  timezone     String       @default("Asia/Ho_Chi_Minh")
+  status       BranchStatus @default(active)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  departments        Department[]
+  wifiConfigs        BranchWifiConfig[]
+  geofences          BranchGeofence[]
+  managers           ManagerBranch[]
+  primaryEmployees   Employee[]                 @relation("PrimaryBranch")
+  assignments        EmployeeBranchAssignment[]
+  attendanceSessions AttendanceSession[]
+  dailySummaries     DailyAttendanceSummary[]
+  zeroTapPolicy      BranchZeroTapPolicy?
+  qrSecret           BranchQrSecret?
+
+  @@index([status])
+  @@map("branches")
+}
+
+model Department {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  name      String
+  code      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  employees Employee[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("departments")
+}
+
+/// Gán manager vào 1 hoặc nhiều chi nhánh (dùng cho BranchScopeGuard).
+/// 1 user role=manager có thể phụ trách nhiều branch.
+model ManagerBranch {
+  userId    String   @map("user_id") @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@index([userId])
+  @@index([branchId])
+  @@map("manager_branches")
+}
+
+model Employee {
+  id               String           @id @default(uuid()) @db.Uuid
+  userId           String           @unique @map("user_id") @db.Uuid
+  employeeCode     String           @unique @map("employee_code")
+  departmentId     String?          @map("department_id") @db.Uuid
+  primaryBranchId  String           @map("primary_branch_id") @db.Uuid
+  employmentStatus EmploymentStatus @default(active) @map("employment_status")
+  joinedAt         DateTime         @default(now()) @map("joined_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  user            User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department      Department?                @relation(fields: [departmentId], references: [id])
+  primaryBranch   Branch                     @relation("PrimaryBranch", fields: [primaryBranchId], references: [id])
+  assignments     EmployeeBranchAssignment[]
+  devices         EmployeeDevice[]
+  scheduleAssigns WorkScheduleAssignment[]
+  sessions        AttendanceSession[]
+  dailySummaries  DailyAttendanceSummary[]
+
+  @@index([primaryBranchId])
+  @@index([departmentId])
+  @@index([employmentStatus])
+  @@map("employees")
+}
+
+model EmployeeBranchAssignment {
+  id             String         @id @default(uuid()) @db.Uuid
+  employeeId     String         @map("employee_id") @db.Uuid
+  branchId       String         @map("branch_id") @db.Uuid
+  assignmentType AssignmentType @default(secondary) @map("assignment_type")
+  effectiveFrom  DateTime       @map("effective_from") @db.Date
+  effectiveTo    DateTime?      @map("effective_to") @db.Date
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, effectiveFrom, effectiveTo])
+  @@index([branchId])
+  @@map("employee_branch_assignments")
+}
+
+// ============================= LOCATION CONFIG =============================
+
+model BranchWifiConfig {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  ssid      String
+  bssid     String?
+  isActive  Boolean  @default(true) @map("is_active")
+  priority  Int      @default(0)
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, isActive])
+  @@index([bssid])
+  @@map("branch_wifi_configs")
+}
+
+model BranchGeofence {
+  id           String   @id @default(uuid()) @db.Uuid
+  branchId     String   @map("branch_id") @db.Uuid
+  name         String
+  centerLat    Decimal  @map("center_lat") @db.Decimal(10, 7)
+  centerLng    Decimal  @map("center_lng") @db.Decimal(10, 7)
+  radiusMeters Int      @map("radius_meters")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, isActive])
+  @@map("branch_geofences")
+}
+
+// ============================= DEVICES =============================
+
+model EmployeeDevice {
+  id                String         @id @default(uuid()) @db.Uuid
+  employeeId        String         @map("employee_id") @db.Uuid
+  deviceFingerprint String         @map("device_fingerprint")
+  platform          DevicePlatform
+  deviceName        String?        @map("device_name")
+  appVersion        String?        @map("app_version")
+  isTrusted         Boolean        @default(false) @map("is_trusted")
+  lastSeenAt        DateTime?      @map("last_seen_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  // Day 5: zero-tap consent + state
+  zeroTapEnabled         Boolean              @default(false) @map("zero_tap_enabled")
+  zeroTapConsentAt       DateTime?            @map("zero_tap_consent_at")
+  zeroTapRevokedAt       DateTime?            @map("zero_tap_revoked_at")
+  zeroTapRevokeReason    ZeroTapRevokeReason? @map("zero_tap_revoke_reason")
+  zeroTapLastTriggerAt   DateTime?            @map("zero_tap_last_trigger_at")
+  attestationVerifiedAt  DateTime?            @map("attestation_verified_at")
+  deviceLockEnabled      Boolean              @default(false) @map("device_lock_enabled")
+  successfulCheckinCount Int                  @default(0) @map("successful_checkin_count")
+
+  employee Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  events   AttendanceEvent[]
+
+  @@unique([employeeId, deviceFingerprint])
+  @@index([employeeId])
+  @@index([zeroTapEnabled])
+  @@map("employee_devices")
+}
+
+// ============================= SCHEDULE =============================
+
+model WorkSchedule {
+  id                   String   @id @default(uuid()) @db.Uuid
+  name                 String
+  startTime            String   @map("start_time")
+  endTime              String   @map("end_time")
+  graceMinutes         Int      @default(10) @map("grace_minutes")
+  overtimeAfterMinutes Int      @default(60) @map("overtime_after_minutes")
+  workdays             Json // [1,2,3,4,5] = Mon-Fri
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  assignments WorkScheduleAssignment[]
+
+  @@map("work_schedules")
+}
+
+model WorkScheduleAssignment {
+  id            String    @id @default(uuid()) @db.Uuid
+  employeeId    String    @map("employee_id") @db.Uuid
+  scheduleId    String    @map("schedule_id") @db.Uuid
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  employee Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  schedule WorkSchedule @relation(fields: [scheduleId], references: [id])
+
+  @@index([employeeId, effectiveFrom, effectiveTo])
+  @@map("work_schedule_assignments")
+}
+
+// ============================= ATTENDANCE =============================
+
+model AttendanceSession {
+  id              String                  @id @default(uuid()) @db.Uuid
+  employeeId      String                  @map("employee_id") @db.Uuid
+  branchId        String                  @map("branch_id") @db.Uuid
+  workDate        DateTime                @map("work_date") @db.Date
+  checkInAt       DateTime?               @map("check_in_at")
+  checkOutAt      DateTime?               @map("check_out_at")
+  workedMinutes   Int?                    @map("worked_minutes")
+  overtimeMinutes Int?                    @map("overtime_minutes")
+  lateMinutes     Int?                    @map("late_minutes")
+  status          AttendanceSessionStatus @default(on_time)
+  trustScore      Int?                    @map("trust_score")
+  note            String?
+  qrTokenUsedAt   DateTime?               @map("qr_token_used_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  employee Employee          @relation(fields: [employeeId], references: [id])
+  branch   Branch            @relation(fields: [branchId], references: [id])
+  events   AttendanceEvent[]
+
+  @@unique([employeeId, workDate])
+  @@index([branchId, workDate])
+  @@index([workDate, status])
+  @@map("attendance_sessions")
+}
+
+model AttendanceEvent {
+  id               String                @id @default(uuid()) @db.Uuid
+  sessionId        String?               @map("session_id") @db.Uuid
+  employeeId       String                @map("employee_id") @db.Uuid
+  branchId         String?               @map("branch_id") @db.Uuid
+  deviceId         String?               @map("device_id") @db.Uuid
+  eventType        AttendanceEventType   @map("event_type")
+  status           AttendanceEventStatus
+  validationMethod ValidationMethod      @default(none) @map("validation_method")
+  trustScore       Int                   @map("trust_score")
+  latitude         Decimal?              @db.Decimal(10, 7)
+  longitude        Decimal?              @db.Decimal(10, 7)
+  accuracyMeters   Int?                  @map("accuracy_meters")
+  ssid             String?
+  bssid            String?
+  ipAddress        String?               @map("ip_address")
+  riskFlags        Json?                 @map("risk_flags")
+  rejectReason     String?               @map("reject_reason")
+  deviceMeta       Json?                 @map("device_meta")
+  // Day 5: trigger, nonce (anti-replay), attestation, wifi scan
+  trigger          AttendanceTrigger     @default(manual)
+  nonce            String?
+  triggerAt        DateTime?             @map("trigger_at")
+  attestationOk    Boolean?              @map("attestation_ok")
+  wifiScan         Json?                 @map("wifi_scan")
+  createdAt        DateTime              @default(now()) @map("created_at")
+
+  session AttendanceSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  device  EmployeeDevice?    @relation(fields: [deviceId], references: [id])
+
+  @@unique([deviceId, nonce], name: "device_nonce_unique")
+  @@index([sessionId, createdAt])
+  @@index([employeeId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([status, createdAt])
+  @@index([trigger, createdAt])
+  @@map("attendance_events")
+}
+
+// ============================= DAILY SUMMARY =============================
+
+model DailyAttendanceSummary {
+  id              String                  @id @default(uuid()) @db.Uuid
+  employeeId      String                  @map("employee_id") @db.Uuid
+  branchId        String                  @map("branch_id") @db.Uuid
+  workDate        DateTime                @map("work_date") @db.Date
+  status          AttendanceSessionStatus
+  workedMinutes   Int                     @default(0) @map("worked_minutes")
+  overtimeMinutes Int                     @default(0) @map("overtime_minutes")
+  lateMinutes     Int                     @default(0) @map("late_minutes")
+  trustScoreAvg   Int?                    @map("trust_score_avg")
+  createdAt       DateTime                @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  branch   Branch   @relation(fields: [branchId], references: [id])
+
+  @@unique([employeeId, workDate])
+  @@index([branchId, workDate])
+  @@index([workDate, status])
+  @@map("daily_attendance_summaries")
+}
+
+// ============================= REPORT EXPORTS =============================
+
+model ReportExport {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  type         String // 'attendance_csv'
+  params       Json
+  status       String    @default("queued") // queued | processing | completed | failed
+  fileName     String?   @map("file_name")
+  fileContent  String?   @map("file_content") @db.Text
+  rowCount     Int?      @map("row_count")
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  completedAt  DateTime? @map("completed_at")
+  expiresAt    DateTime? @map("expires_at")
+
+  @@index([userId, createdAt])
+  @@map("report_exports")
+}
+
+// ============================= NOTIFICATIONS =============================
+
+/// In-app notifications for users (employee + manager). Polled by portal/mobile.
+/// Created by workers (missing-checkout) and services (override).
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ============================= AUDIT =============================
+
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  userId     String?     @map("user_id") @db.Uuid
+  action     AuditAction
+  entityType String      @map("entity_type")
+  entityId   String?     @map("entity_id")
+  before     Json?
+  after      Json?
+  ipAddress  String?     @map("ip_address")
+  userAgent  String?     @map("user_agent")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ============================= DAY 5: ZERO-TAP + QR KIOSK =============================
+
+/// Per-branch zero-tap policy. Defaults off — admin must opt a branch in.
+model BranchZeroTapPolicy {
+  branchId                  String   @id @map("branch_id") @db.Uuid
+  enabled                   Boolean  @default(false)
+  windowStart               String   @default("07:30") @map("window_start") // HH:MM local
+  windowEnd                 String   @default("09:30") @map("window_end")
+  cooldownSeconds           Int      @default(600) @map("cooldown_seconds")
+  minManualCheckinsToEnable Int      @default(2) @map("min_manual_checkins_to_enable")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("branch_zero_tap_policies")
+}
+
+/// Per-branch HMAC secret for QR kiosk token signing. Rotate via admin.
+model BranchQrSecret {
+  branchId   String   @id @map("branch_id") @db.Uuid
+  hmacSecret String   @map("hmac_secret")
+  kioskToken String   @unique @map("kiosk_token") // shared with kiosk hardware to auth GET qr-token
+  rotatedAt  DateTime @default(now()) @map("rotated_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("branch_qr_secrets")
+}
