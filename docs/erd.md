@@ -134,6 +134,18 @@ enum AttendanceTrigger {
   zero_tap_wifi
   zero_tap_geofence
   zero_tap_silent_push
+  qr_kiosk
+}
+
+enum AIMessageRole {
+  user
+  assistant
+  system
+}
+
+enum AIInsightScope {
+  admin
+  branch
 }
 
 enum ZeroTapRevokeReason {
@@ -213,6 +225,7 @@ model Branch {
   wifiConfigs        BranchWifiConfig[]
   geofences          BranchGeofence[]
   zeroTapPolicy      BranchZeroTapPolicy?
+  qrSecret           BranchQrSecret?
   primaryEmployees   Employee[]                    @relation("PrimaryBranch")
   assignments        EmployeeBranchAssignment[]
   attendanceSessions AttendanceSession[]
@@ -245,17 +258,22 @@ model Employee {
   primaryBranchId  String           @map("primary_branch_id") @db.Uuid
   employmentStatus EmploymentStatus @default(active) @map("employment_status")
   joinedAt         DateTime         @default(now()) @map("joined_at")
+  // Face verification (128-d embedding L2-normalized, stored as bytea; null = chưa enroll)
+  faceEmbedding    Bytes?           @map("face_embedding")
+  faceEnrolledAt   DateTime?        @map("face_enrolled_at")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
-  user            User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  department      Department?                @relation(fields: [departmentId], references: [id])
-  primaryBranch   Branch                     @relation("PrimaryBranch", fields: [primaryBranchId], references: [id])
-  assignments     EmployeeBranchAssignment[]
-  devices         EmployeeDevice[]
-  scheduleAssigns WorkScheduleAssignment[]
-  sessions        AttendanceSession[]
-  dailySummaries  DailyAttendanceSummary[]
+  user              User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department        Department?                @relation(fields: [departmentId], references: [id])
+  primaryBranch     Branch                     @relation("PrimaryBranch", fields: [primaryBranchId], references: [id])
+  assignments       EmployeeBranchAssignment[]
+  devices           EmployeeDevice[]
+  scheduleAssigns   WorkScheduleAssignment[]
+  sessions          AttendanceSession[]
+  dailySummaries    DailyAttendanceSummary[]
+  faceEnrollments   FaceEnrollmentLog[]
+  aiChatMessages    AIChatMessage[]
 
   @@index([primaryBranchId])
   @@index([departmentId])
@@ -338,6 +356,34 @@ model BranchZeroTapPolicy {
   @@map("branch_zero_tap_policies")
 }
 
+// Secret HMAC cho QR kiosk check-in. 1 branch - 1 secret (rotate bằng admin).
+model BranchQrSecret {
+  id         String   @id @default(uuid()) @db.Uuid
+  branchId   String   @unique @map("branch_id") @db.Uuid
+  hmacSecret String   @map("hmac_secret") // 32 bytes base64, rotate khi lộ
+  rotatedAt  DateTime @default(now()) @map("rotated_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("branch_qr_secrets")
+}
+
+// ===================== FACE =====================
+
+model FaceEnrollmentLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  employeeId    String   @map("employee_id") @db.Uuid
+  deviceId      String?  @map("device_id") @db.Uuid
+  embeddingHash String   @map("embedding_hash") // SHA256 của embedding để audit không lộ raw
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, createdAt])
+  @@map("face_enrollment_logs")
+}
+
 // ===================== DEVICES =====================
 
 model EmployeeDevice {
@@ -415,6 +461,8 @@ model AttendanceSession {
   overtimeMinutes Int?                    @map("overtime_minutes")
   status          AttendanceSessionStatus @default(on_time)
   trustScore      Int?                    @map("trust_score") // điểm thấp nhất giữa check-in/out
+  // QR kiosk one-time-per-day: khi đã check-in bằng QR hôm nay, chặn lần QR thứ 2
+  qrTokenUsedAt   DateTime?               @map("qr_token_used_at")
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
 
@@ -452,6 +500,9 @@ model AttendanceEvent {
   nonce           String?               // chỉ set với zero-tap
   triggerAt       DateTime?             @map("trigger_at") // thời điểm OS fire event ở client
   attestationOk   Boolean?              @map("attestation_ok")
+  // Multi-factor extras
+  faceSimilarity  Decimal?              @map("face_similarity") @db.Decimal(4, 3) // 0.000 - 1.000
+  wifiScan        Json?                 @map("wifi_scan")       // [{ ssid, bssid, rssi }] full scan từ mobile
   createdAt       DateTime              @default(now()) @map("created_at")
 
   session AttendanceSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -485,6 +536,40 @@ model DailyAttendanceSummary {
   @@index([branchId, workDate])
   @@index([workDate, status])
   @@map("daily_attendance_summaries")
+}
+
+// ===================== AI (Gemini) =====================
+
+model AIChatMessage {
+  id             String        @id @default(uuid()) @db.Uuid
+  employeeId     String        @map("employee_id") @db.Uuid
+  conversationId String?       @map("conversation_id") @db.Uuid
+  role           AIMessageRole
+  content        String        @db.Text
+  tokensIn       Int?          @map("tokens_in")
+  tokensOut      Int?          @map("tokens_out")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, createdAt])
+  @@index([conversationId, createdAt])
+  @@map("ai_chat_messages")
+}
+
+// Cache 1h cho AI Insights tuần — tránh gọi Gemini liên tục
+model AIInsightCache {
+  id          String         @id @default(uuid()) @db.Uuid
+  scope       AIInsightScope
+  scopeId     String?        @map("scope_id") @db.Uuid // null khi scope=admin; branch_id khi scope=branch
+  weekStart   DateTime       @map("week_start") @db.Date
+  payload     Json           // { positives[], concerns[], recommendations[] }
+  generatedAt DateTime       @default(now()) @map("generated_at")
+  expiresAt   DateTime       @map("expires_at")
+
+  @@unique([scope, scopeId, weekStart])
+  @@index([expiresAt])
+  @@map("ai_insights_cache")
 }
 
 // ===================== AUDIT =====================
@@ -529,7 +614,10 @@ model AuditLog {
 | `employee_branch_assignments` | `(employee_id, effective_from, effective_to)` | Check active assignment |
 | `employee_devices` | `(zero_tap_enabled, is_trusted)` | Lookup nhanh devices eligible zero-tap |
 | `attendance_events` | UNIQUE `(device_id, nonce)` | Chống replay zero-tap request |
-| `attendance_events` | `(trigger, created_at)` | Báo cáo tỷ lệ zero-tap, anomaly |
+| `attendance_events` | `(trigger, created_at)` | Báo cáo tỷ lệ zero-tap/QR, anomaly |
+| `ai_chat_messages` | `(employee_id, created_at)` | Load history chat nhanh theo user |
+| `ai_insights_cache` | UNIQUE `(scope, scope_id, week_start)` | Idempotent cache AI Insights |
+| `face_enrollment_logs` | `(employee_id, created_at)` | Audit re-enroll history |
 
 ---
 
@@ -586,6 +674,11 @@ Thay vì query join `attendance_sessions + attendance_events` mỗi lần render
 | Chống replay zero-tap | UNIQUE `(device_id, nonce)` trong `attendance_events` |
 | Phân biệt manual vs zero-tap | `attendance_events.trigger` enum |
 | Device attestation (Play Integrity / App Attest) | `employee_devices.attestation_verified_at` + `attendance_events.attestation_ok` |
+| Face verification | `employees.face_embedding` (bytea 128-d) + `attendance_events.face_similarity` |
+| QR Kiosk TOTP-style | `branch_qr_secrets.hmac_secret` + `attendance_sessions.qr_token_used_at` (one-time-per-day) |
+| Multi-factor BSSID scan | `attendance_events.wifi_scan` (jsonb array) |
+| AI Chat scope per user | `ai_chat_messages.employee_id` FK bắt buộc |
+| AI Insights cache | `ai_insights_cache` UNIQUE `(scope, scope_id, week_start)` |
 
 ---
 
@@ -629,5 +722,7 @@ GROUP BY branch_id ORDER BY 2 DESC LIMIT 10;
 
 ## 10. Changelog
 
+- **v0.4** (2026-04-17): Bỏ face verification khỏi migration #5 — các cột `employees.face_embedding`, `employees.face_enrolled_at`, `attendance_events.face_similarity` và bảng `face_enrollment_logs` **không tạo** cho MVP. Giữ model definitions làm tham chiếu lịch sử. Migration #5 Day 5 chỉ còn zero-tap + QR kiosk + `attendance_events.wifi_scan` + `AttendanceTrigger.qr_kiosk`.
+- **v0.3** (2026-04-17): Thêm face verification (`employees.face_embedding` + `face_enrollment_logs`), QR kiosk (`branch_qr_secrets` + `attendance_sessions.qr_token_used_at`), AI Gemini (`ai_chat_messages` + `ai_insights_cache`), multi-factor BSSID (`attendance_events.wifi_scan` + `face_similarity`), enum `AttendanceTrigger.qr_kiosk`, `AIMessageRole`, `AIInsightScope`.
 - **v0.2** (2026-04-16): Thêm zero-tap support — enum `AttendanceTrigger` + `ZeroTapRevokeReason`, cột zero-tap trên `employee_devices`, bảng `branch_zero_tap_policies`, field `trigger`/`nonce`/`trigger_at`/`attestation_ok` + UNIQUE `(device_id, nonce)` trên `attendance_events`.
 - **v0.1** (2026-04-15): Khởi tạo từ spec v0.1.

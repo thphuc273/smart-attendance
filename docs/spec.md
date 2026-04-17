@@ -132,7 +132,36 @@ Backend:
 - Cùng cơ chế nhưng trigger khi rời geofence (`geofence_exit`) HOẶC disconnect WiFi quá 5 phút
 - Window mặc định 17:00–20:00
 
-### 4.4 Quên check-out
+### 4.4 QR Kiosk check-in (branch không có WiFi whitelist)
+
+**Mục tiêu:** Chi nhánh nhỏ, pop-up store, sự kiện — không cấu hình WiFi trước được. Chi nhánh mở 1 màn hình portal `/kiosk/:branchId` hiển thị QR code rotate mỗi 25s; nhân viên mở app mobile → tab Check-in → "Quét QR" → capture selfie → submit.
+
+**Thiết kế token (TOTP-style):**
+- `token = HMAC_SHA256(secret, branch_id + time_bucket)` với `time_bucket = floor(unix_ts / 30)`
+- Portal client fetch `/kiosk/branches/:id/qr-token` mỗi 25s, nhận `{ token, exp, nonce, next_rotate_at }`
+- Valid 30 giây (cho phép lệch 1 bucket về trước để tolerant drift)
+- Secret lưu trong `branch_qr_secrets.hmac_secret`, rotate thủ công qua admin UI
+
+**Flow:**
+```
+Mobile quét QR → { branch_id, token, exp, nonce }
+  → collect GPS + selfie (expo-camera front)
+  → POST /attendance/qr-check-in { token, nonce, branch_id, latitude, longitude, selfie_base64, device_fingerprint }
+Backend:
+  1. Verify HMAC: so với secret của branch, check time bucket current ± 1
+  2. Check expiry (exp > now)
+  3. Check one-time-per-day: `attendance_sessions.qr_token_used_at IS NULL` cho session hôm nay
+  4. GPS geofence verify bắt buộc (không fallback WiFi vì branch không có whitelist)
+  5. Face verify bắt buộc (cosine similarity ≥ 0.85 vs `employees.face_embedding`)
+  6. Tạo session + event với `trigger = qr_kiosk`
+  7. Set `qr_token_used_at = now()` trên session
+```
+
+**Bảo mật:**
+- QR bị chụp màn hình replay → vẫn chặn vì (a) token hết hạn sau 30s, (b) cần selfie live, (c) cần GPS trong geofence, (d) one-time-per-day
+- Kiosk page chạy chế độ fullscreen, no-chrome; có route auth riêng (kiosk token) để không ai vô tình mở từ laptop ngoài
+
+### 4.5 Quên check-out
 
 - Cron job 23:59 mỗi ngày:
   - Với session có `check_in_at` nhưng không có `check_out_at`
@@ -140,13 +169,49 @@ Backend:
   - Không tính `overtime`, `worked_minutes` = null
   - Thông báo manager ngày hôm sau
 
-### 4.5 Tổng hợp ngày công
+### 4.6 Tổng hợp ngày công
 
 - Cron job 00:30 mỗi ngày:
   - Duyệt tất cả active employee
   - Với nhân viên không có session hôm trước → tạo `daily_attendance_summary` status=`absent`
   - Nhân viên có session → tổng hợp vào `daily_attendance_summary`
 - Dashboard đọc từ `daily_attendance_summary` thay vì join lại từ raw events → tăng performance
+
+### 4.7 Multi-factor check-in (Face + GPS + WiFi BSSID scan)
+
+Tab Check-in trên mobile gom mọi yếu tố xác thực vào 1 viewport. Request check-in thường (`/attendance/check-in`) mang theo đầy đủ dữ liệu multi-factor:
+
+| Yếu tố | Thu thập | Ưu tiên |
+|---|---|---|
+| **WiFi BSSID scan** | Full list `Array<{ssid, bssid, rssi}>` xung quanh (react-native-wifi-reborn). Match **bất kỳ** BSSID nào với `branch_wifi_configs` whitelist → pass | **#1** — nếu có WiFi match thì skip GPS accuracy check |
+| **GPS** | lat/lng + accuracy, fetch live ngay trước submit | **#2** fallback khi không có WiFi match |
+| **Face (selfie)** | Base64 ảnh front camera, server so cosine với `employees.face_embedding` (ngưỡng ≥ 0.85) | Bắt buộc cho QR kiosk, optional cho manual check-in thường (nhưng có face → +10 trust score) |
+| **Device fingerprint** | `expo-device` + `expo-crypto` | Quyết định `is_trusted` flag |
+
+**Streak gamification (mobile only, client compute + server authoritative):**
+- `GET /attendance/me/streak` → `{ current, best, on_time_rate_30d, heatmap }`
+- `current` = số ngày **liên tiếp** gần nhất status `on_time` (break khi gặp `late`/`absent`)
+- `best` = chuỗi dài nhất từ trước tới nay
+- `heatmap` = array 30 ngày gần nhất với status color (xanh=on_time, đỏ=late/absent, xám=weekend/no_data)
+- Hiển thị trên tab Check-in làm động lực nhẹ; không dùng làm điều kiện chấm công
+
+### 4.8 Smart Geofence Notification (nhắc check-in, khác zero-tap)
+
+**Phân biệt:**
+- **Zero-tap** = tự động check-in trong nền (cần consent + trusted + attestation)
+- **Geofence Notification** = chỉ **nhắc** nhân viên mở app check-in, không tự submit gì
+
+**Flow:**
+```
+Mobile đăng ký background task GEOFENCE_NOTIFY với expo-location
+  → Các branch user có assignment → Location.startGeofencingAsync
+  → Khi enter region → background task fires
+  → Check debounce: AsyncStorage.last_notified_at[branch_id] < now - 30 min?
+  → expo-notifications.scheduleNotificationAsync "Bạn đang gần HCM-Q1, nhớ check-in nhé"
+  → Update last_notified_at[branch_id] = now
+```
+
+**Cấu hình:** toggle trên tab Profile. Default = on. Tắt không ảnh hưởng zero-tap/manual.
 
 ---
 
@@ -305,7 +370,37 @@ Zero-tap có bề mặt tấn công khác vì không có user interaction:
   - Thiết bị mới chưa trusted
 - Xuất báo cáo **CSV** theo khoảng thời gian (MVP)
 
-### 7.4 Pagination & filter
+### 7.4 AI Insights + Chat HR Assistant (Gemini)
+
+**AI Insights tuần (Dashboard panel):**
+- Endpoint `GET /ai/insights/weekly?branch_id?&week_start?`
+- Admin xem toàn hệ thống, manager scope branch, employee **không được gọi**
+- Backend aggregate số liệu 7 ngày (on_time rate, late count, trend vs tuần trước, top anomalies) → build prompt → gọi Gemini (`gemini-1.5-flash`) → parse JSON `{ positives[], concerns[], recommendations[] }` (3 mục mỗi array tối đa 5 bullet)
+- Cache Redis/DB TTL 1 giờ (`ai_insights_cache`) để không gọi Gemini liên tục
+- Dashboard portal hiển thị 3 cột: **Điểm tích cực · Cần chú ý · Đề xuất hành động**
+
+**Chat HR Assistant (mobile tab):**
+- Endpoint `POST /ai/chat` streaming SSE
+- Context builder: **scope theo role**
+  - `employee` → chỉ data của chính user (sessions 30 ngày, schedule, streak, leave nếu có)
+  - `manager` → data của branch mình quản lý
+  - `admin` → toàn hệ thống
+- System prompt nhấn mạnh: "Không tiết lộ dữ liệu user khác. Nếu user hỏi về người khác → từ chối lịch sự."
+- Guard backend (`AIGuard`): reject query nếu employee ref đến `employee_id` khác mình
+- History lưu `ai_chat_messages` (employee_id, role, content) — user có thể xem lại
+
+**Tầm sử dụng:** trợ lý nhẹ, không phải agent có quyền thao tác. Không cho AI gọi tool mutate (không approve leave, không edit session).
+
+### 7.5 Live check-in feed (SSE)
+
+- Endpoint `GET /dashboard/live` Server-Sent Events
+- Publish từ `AttendanceService.checkIn/out` sau commit transaction, qua Redis pub/sub channel `attendance:live`
+- Admin nhận all events; manager chỉ nhận events của branch mình
+- Payload: `{ event_id, employee_code, full_name, branch_name, status, trust_score, trigger, created_at }`
+- Portal dashboard có panel "Check-in trực tiếp" — list 20 entries gần nhất, fade-in khi có event mới
+- Heartbeat mỗi 15s để giữ kết nối + phát hiện disconnect
+
+### 7.6 Pagination & filter
 
 - Mọi list API: `?page=1&limit=20&sort=check_in_at:desc`
 - Filter: `branch_id`, `department_id`, `employee_id`, `date_from`, `date_to`, `status`
@@ -391,7 +486,10 @@ Zero-tap có bề mặt tấn công khác vì không có user interaction:
 - `POST /attendance/zero-tap/check-out`
 - `GET  /attendance/zero-tap/settings/me` (trạng thái opt-in của device hiện tại)
 - `PATCH /attendance/zero-tap/settings/me` (toggle consent)
-- `GET  /attendance/me` (lịch sử cá nhân)
+- `POST /attendance/qr-check-in` (QR kiosk flow, body `token` + `selfie_base64`)
+- `POST /employees/me/face/enroll`
+- `GET  /attendance/me` (lịch sử cá nhân, cursor pagination)
+- `GET  /attendance/me/streak`
 - `GET  /attendance/sessions` (manager/admin, filter)
 - `GET  /attendance/sessions/:id`
 - `PATCH /attendance/sessions/:id` (manager override, có audit log)
@@ -406,6 +504,16 @@ Zero-tap có bề mặt tấn công khác vì không có user interaction:
 - `GET /dashboard/admin/overview`
 - `GET /dashboard/manager/:branchId`
 - `GET /dashboard/anomalies`
+- `GET /dashboard/live` (SSE)
+
+### 9.8 AI (Gemini)
+- `GET  /ai/insights/weekly` (admin + manager scoped)
+- `POST /ai/chat` (SSE streaming, scope theo role)
+- `GET  /ai/chat/history`
+
+### 9.9 Kiosk
+- `GET  /kiosk/branches/:id/qr-token` (kiosk auth)
+- `GET|PUT /branches/:id/qr-secret` (admin, rotate HMAC)
 
 ### 9.7 Schedules
 - `GET  /work-schedules`
@@ -428,7 +536,7 @@ Chi tiết trong [`erd.md`](erd.md). Tóm tắt các bảng chính:
 
 ---
 
-## 11. MVP scope (5 ngày)
+## 11. MVP scope (6 ngày)
 
 ### Must-have (ngày 1–3)
 - [ ] Auth + RBAC 3 role
@@ -447,20 +555,32 @@ Chi tiết trong [`erd.md`](erd.md). Tóm tắt các bảng chính:
 - [ ] Daily summary cron
 - [ ] CSV export
 - [ ] Manager dashboard chi nhánh
-
-### Bonus (ngày 4–5 nếu kịp)
 - [ ] Anomaly Dashboard
 - [ ] Heatmap check-in theo giờ
-- [ ] Notification (FE toast / mock email)
+
+### Bonus A (ngày 5) — Multi-factor + Kiosk + Zero-tap
+- [ ] **Zero-tap check-in** (flagship differentiator)
+- [ ] **QR Kiosk mode** TOTP-style HMAC-SHA256, rotate 25s
+- [ ] **Multi-factor check-in** (full BSSID scan + GPS)
+- [ ] **Streak gamification** mobile
 - [ ] Rate limit đầy đủ
-- [ ] **Zero-tap check-in** (flagship differentiator) — opt-in flow + geofence/WiFi trigger + attestation + anti-fraud lớp 4
+
+> **Scope change v0.4 (2026-04-17):** Face verification (§4.6, §4.7 face, §13 QĐ #11) loại khỏi MVP — chi phí native + model nặng, không cân xứng 1 ngày sprint. Anti-replay QR kiosk dựa vào token 30s + one-time-per-day + GPS + device fingerprint trusted.
+
+### Bonus B (ngày 6) — AI + Realtime + Mobile polish
+- [ ] **Gemini AI Insights** (weekly dashboard panel)
+- [ ] **Chat HR Assistant** (scope theo role, streaming SSE)
+- [ ] **Live check-in feed** SSE
+- [ ] **Smart Geofence Notification** (nhắc check-in, debounce 30')
+- [ ] **Mobile 5-tab shell** (Check-in · History · Lịch · Chat AI · Profile)
+- [ ] Release v0.3.0 + demo video
 
 ### Explicitly out-of-scope
-- Face recognition
-- Realtime socket
+- Face **liveness** detection (blink/head turn) — chỉ match embedding
 - Payroll integration
-- Push notification thật (mock là đủ)
-- Mobile build production (demo dev build đủ)
+- Push notification server (FCM/APNs) thật — dùng local notification
+- Mobile build production (demo EAS dev build đủ)
+- AI agent có quyền mutate data (chỉ read)
 
 ---
 
@@ -491,10 +611,18 @@ Chi tiết trong [`erd.md`](erd.md). Tóm tắt các bảng chính:
 | 8 | Zero-tap consent | Opt-in per-device, bắt buộc device trusted ≥2 manual check-in, cooldown 600s, trừ 5đ trust |
 | 9 | Zero-tap trigger | WiFi `CONNECTIVITY_CHANGE` + Geofence enter; iOS dự phòng silent push |
 | 10 | Zero-tap attestation | Play Integrity (Android) / App Attest (iOS) token kèm mỗi request |
+| 11 | Face verification | Embedding 128-d từ `@vladmandic/face-api` (nodejs-wasm), cosine ≥ 0.85 match |
+| 12 | QR Kiosk token | HMAC-SHA256 TOTP 30s bucket + one-time-per-day per session |
+| 13 | AI Insights model | `gemini-1.5-flash`, cache 1h, rate limit 10/giờ/user |
+| 14 | Chat AI scope | Strict per-role — employee chỉ thấy data mình, guard backend reject cross-user query |
+| 15 | Live feed transport | SSE (đơn hướng server→client), Redis pub/sub backing |
+| 16 | Geofence Notification | Mobile-only, debounce 30', **khác** zero-tap (chỉ nhắc, không auto submit) |
 
 ---
 
 ## 14. Changelog
 
-- **v0.2** (2026-04-16): Thêm **Zero-tap check-in** (§4.3, §5.6, §6 lớp 4, §9.4, §13 quyết định 8–10). Đổi số §4.4, §4.5. Chuyển mobile stack sang **Expo + React Native** (expo-router, expo-task-manager, expo-location geofencing, NativeWind). Web portal chuyển sang **Next.js 15 + React 19 + Tailwind**.
+- **v0.4** (2026-04-17): Bỏ **Face verification** khỏi MVP (§4.6, §4.7 face mode, §13 QĐ #11 deprecated). QR kiosk không còn yêu cầu `selfie_base64`; multi-factor check-in còn lại **GPS + WiFi BSSID scan + device fingerprint**. Các bảng `face_enrollment_logs`, cột `employees.face_embedding`, `attendance_events.face_similarity` **không migrate** cho Day 5 — giữ trong docs làm lịch sử.
+- **v0.3** (2026-04-17): Mở rộng sprint **5 → 6 ngày**. Thêm §4.4 **QR Kiosk**, §4.7 **Multi-factor + Streak**, §4.8 **Smart Geofence Notification**, §7.4 **AI Insights + Chat HR Assistant (Gemini)**, §7.5 **Live check-in feed SSE**. Tách MVP scope Day 5 (Bonus A: Face + QR + Zero-tap + Multi-factor) và Day 6 (Bonus B: AI + SSE + 5-tab + Release). Thêm quyết định 11–16.
+- **v0.2** (2026-04-16): Thêm **Zero-tap check-in** (§4.3, §5.6, §6 lớp 4, §9.4, §13 quyết định 8–10). Chuyển mobile sang **Expo + React Native**, portal sang **Next.js 15 + React 19 + Tailwind**.
 - **v0.1** (2026-04-15): Bản đầu tiên, chốt scope MVP 5 ngày.
