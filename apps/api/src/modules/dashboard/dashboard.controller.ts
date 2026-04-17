@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleCode } from '@prisma/client';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -35,5 +35,15 @@ export class DashboardController {
   getAnomalies(@CurrentUser() user: AuthenticatedUser) {
     const isSuperAdmin = user.roles.includes(RoleCode.admin);
     return this.dashboard.getAnomalies(user.id, isSuperAdmin);
+  }
+
+  @Get('leaderboard')
+  @Roles(RoleCode.admin, RoleCode.manager)
+  getLeaderboard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('branch_id') branchId?: string,
+  ) {
+    const isSuperAdmin = user.roles.includes(RoleCode.admin);
+    return this.dashboard.getLeaderboard(user.id, isSuperAdmin, branchId ?? null);
   }
 }

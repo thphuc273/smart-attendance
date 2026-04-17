@@ -37,6 +37,35 @@ interface AnomaliesResp {
   };
 }
 
+interface Leaderboard {
+  data: {
+    earliest_today: {
+      employee_id: string;
+      employee_code: string;
+      full_name: string;
+      branch: { id: string; name: string };
+      check_in_at: string | null;
+      late_minutes: number;
+      status: string;
+    }[];
+    most_on_time_30d: {
+      employee_id: string;
+      employee_code: string;
+      full_name: string;
+      branch: { id: string; name: string } | null;
+      on_time_days: number;
+    }[];
+    most_late_30d: {
+      employee_id: string;
+      employee_code: string;
+      full_name: string;
+      branch: { id: string; name: string } | null;
+      late_days: number;
+      total_late_minutes: number;
+    }[];
+  };
+}
+
 interface ManagerDashboard {
   data: {
     branch: { id: string; name: string };
@@ -85,6 +114,19 @@ export default function DashboardPage() {
     currentBranchId ? `dashboard/manager/${currentBranchId}` : 'dashboard/manager/none',
     !!user && !admin && !!currentBranchId,
   );
+
+  // Leaderboard — admin sees all, manager sees scope (or selected branch)
+  const lbPath = admin
+    ? 'dashboard/leaderboard'
+    : currentBranchId
+      ? `dashboard/leaderboard?branch_id=${currentBranchId}`
+      : 'dashboard/leaderboard';
+  const leaderboardQ = useApiQuery<Leaderboard>(
+    ['dashboard', 'leaderboard', admin ? null : currentBranchId] as const,
+    lbPath,
+    !!user && (admin || !!currentBranchId),
+  );
+  const leaderboard = leaderboardQ.data?.data ?? null;
 
   const anomalies = anomaliesQ.data?.data ?? null;
   const overview = overviewQ.data?.data ?? null;
@@ -289,6 +331,71 @@ export default function DashboardPage() {
           </section>
         )}
 
+        {leaderboard && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-xl font-bold text-slate-900">🏆 Leaderboard</h2>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <LeaderCard title="⏰ Đi sớm nhất hôm nay" tone="teal">
+                {leaderboard.earliest_today.length === 0 ? (
+                  <p className="text-xs text-slate-400">Chưa có ai check-in hôm nay.</p>
+                ) : (
+                  leaderboard.earliest_today.map((e, i) => (
+                    <LeaderRow
+                      key={e.employee_id}
+                      rank={i + 1}
+                      name={e.full_name}
+                      sub={`${e.employee_code} · ${e.branch?.name ?? ''}`}
+                      value={
+                        e.check_in_at
+                          ? new Date(e.check_in_at).toLocaleTimeString('vi-VN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '—'
+                      }
+                      valueTone="teal"
+                    />
+                  ))
+                )}
+              </LeaderCard>
+
+              <LeaderCard title="✨ Đúng giờ nhất (30 ngày)" tone="emerald">
+                {leaderboard.most_on_time_30d.length === 0 ? (
+                  <p className="text-xs text-slate-400">Chưa đủ dữ liệu 30 ngày.</p>
+                ) : (
+                  leaderboard.most_on_time_30d.map((e, i) => (
+                    <LeaderRow
+                      key={e.employee_id}
+                      rank={i + 1}
+                      name={e.full_name}
+                      sub={`${e.employee_code} · ${e.branch?.name ?? ''}`}
+                      value={`${e.on_time_days} ngày`}
+                      valueTone="emerald"
+                    />
+                  ))
+                )}
+              </LeaderCard>
+
+              <LeaderCard title="🐢 Đi muộn nhất (30 ngày)" tone="rose">
+                {leaderboard.most_late_30d.length === 0 ? (
+                  <p className="text-xs text-slate-400">Không ai đi muộn 🎉</p>
+                ) : (
+                  leaderboard.most_late_30d.map((e, i) => (
+                    <LeaderRow
+                      key={e.employee_id}
+                      rank={i + 1}
+                      name={e.full_name}
+                      sub={`${e.employee_code} · ${e.late_days} lần · ${e.branch?.name ?? ''}`}
+                      value={`${e.total_late_minutes}m`}
+                      valueTone="rose"
+                    />
+                  ))
+                )}
+              </LeaderCard>
+            </div>
+          </section>
+        )}
+
         <section className="mt-6">
           <h2 className="mb-3 text-xl font-bold text-slate-900">🚨 Bất thường</h2>
           {!anomalies ? (
@@ -450,6 +557,74 @@ function AnomalyCard({
         </span>
       </div>
       <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function LeaderCard({
+  title,
+  tone,
+  children,
+}: {
+  title: string;
+  tone: 'teal' | 'emerald' | 'rose';
+  children: React.ReactNode;
+}) {
+  const accent =
+    tone === 'teal'
+      ? 'from-teal-500 to-emerald-500'
+      : tone === 'emerald'
+        ? 'from-emerald-500 to-teal-500'
+        : 'from-rose-500 to-pink-500';
+  return (
+    <div className="overflow-hidden rounded-2xl bg-white shadow-card">
+      <div className={`h-1 bg-gradient-to-r ${accent}`} />
+      <div className="p-4">
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>
+        <div className="space-y-1">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+const RANK_STYLES: Record<number, string> = {
+  1: 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white',
+  2: 'bg-gradient-to-br from-slate-300 to-slate-400 text-white',
+  3: 'bg-gradient-to-br from-orange-400 to-amber-500 text-white',
+};
+
+function LeaderRow({
+  rank,
+  name,
+  sub,
+  value,
+  valueTone,
+}: {
+  rank: number;
+  name: string;
+  sub: string;
+  value: string;
+  valueTone: 'teal' | 'emerald' | 'rose';
+}) {
+  const rankClass = RANK_STYLES[rank] ?? 'bg-slate-100 text-slate-600';
+  const valueClass =
+    valueTone === 'teal'
+      ? 'text-teal-700'
+      : valueTone === 'emerald'
+        ? 'text-emerald-700'
+        : 'text-rose-700';
+  return (
+    <div className="flex items-center gap-3 border-t border-slate-100 py-2 first:border-t-0">
+      <span
+        className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${rankClass}`}
+      >
+        {rank}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-slate-900">{name}</div>
+        <div className="truncate text-[11px] text-slate-500">{sub}</div>
+      </div>
+      <span className={`font-mono text-sm font-bold ${valueClass}`}>{value}</span>
     </div>
   );
 }
