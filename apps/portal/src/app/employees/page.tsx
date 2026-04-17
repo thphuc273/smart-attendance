@@ -507,6 +507,7 @@ function EditForm({
           value={form.primary_branch_id}
           onChange={(e) => setForm((f) => ({ ...f, primary_branch_id: e.target.value }))}
         >
+          <option value="">(Không có chi nhánh)</option>
           {branches.map((b) => (
             <option key={b.id} value={b.id}>{b.name}</option>
           ))}
@@ -547,7 +548,7 @@ function AssignmentForm({
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
-    branch_id: branches[0]?.id ?? '',
+    branch_id: '',
     assignment_type: 'secondary' as const,
     effective_from: today,
     effective_to: '',
@@ -580,10 +581,12 @@ function AssignmentForm({
       <label className="block">
         <span className="text-slate-600">Branch</span>
         <select
+          required
           className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.branch_id}
           onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value }))}
         >
+          <option value="" disabled>-- Chọn chi nhánh --</option>
           {branches.map((b) => (
             <option key={b.id} value={b.id}>{b.name}</option>
           ))}
@@ -649,7 +652,7 @@ function CreateModal({
     full_name: '',
     phone: '',
     employee_code: '',
-    primary_branch_id: branches[0]?.id ?? '',
+    primary_branch_id: '',
     role: 'employee' as const,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -764,6 +767,7 @@ function CreateModal({
             value={form.primary_branch_id}
             onChange={(e) => setForm((f) => ({ ...f, primary_branch_id: e.target.value }))}
           >
+            <option value="" disabled>-- Chọn chi nhánh --</option>
             {branches.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}

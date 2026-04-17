@@ -1,7 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { PrismaService } from '../prisma/prisma.service';
 
 const VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
+const DASHBOARD_CACHE_TTL_MS = 60 * 1000;
 
 /** UTC-midnight Date that represents today in VN calendar (UTC+7). */
 function todayInVN(): Date {
@@ -12,9 +15,27 @@ function todayInVN(): Date {
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
+
+  /** Cache aggregate result for 60s. Key should include scope + date components. */
+  private async memoize<T>(key: string, factory: () => Promise<T>): Promise<T> {
+    const hit = await this.cache.get<T>(key);
+    if (hit !== undefined && hit !== null) return hit;
+    const value = await factory();
+    await this.cache.set(key, value, DASHBOARD_CACHE_TTL_MS);
+    return value;
+  }
 
   async getAdminOverview() {
+    return this.memoize(`dashboard:admin:overview:${todayInVN().toISOString().slice(0, 10)}`, () =>
+      this.computeAdminOverview(),
+    );
+  }
+
+  private async computeAdminOverview() {
     // VN calendar day — independent of server TZ. daily_attendance_summaries
     // is populated by cron 00:30 so it's empty on fresh DB / before cron runs.
     // Source of truth for TODAY = attendanceSession directly; summary is for
@@ -107,6 +128,14 @@ export class DashboardService {
       });
       if (!managed) throw new NotFoundException('Branch not found or outside your scope');
     }
+    // Scope check stays outside cache; payload is identical per branch+day so key on branch+day.
+    return this.memoize(
+      `dashboard:manager:${branchId}:${todayInVN().toISOString().slice(0, 10)}`,
+      () => this.computeManagerBranchDashboard(branchId),
+    );
+  }
+
+  private async computeManagerBranchDashboard(branchId: string) {
 
     const branch = await this.prisma.branch.findUnique({
       where: { id: branchId },
@@ -232,6 +261,19 @@ export class DashboardService {
    * Manager: only their managed branches; branchIdFilter must be in scope.
    */
   async getLeaderboard(
+    userId: string,
+    isSuperAdmin: boolean,
+    branchIdFilter: string | null,
+  ) {
+    const dayKey = todayInVN().toISOString().slice(0, 10);
+    const scopeKey = isSuperAdmin ? 'admin' : `u:${userId}`;
+    return this.memoize(
+      `dashboard:leaderboard:${scopeKey}:${branchIdFilter ?? 'all'}:${dayKey}`,
+      () => this.computeLeaderboard(userId, isSuperAdmin, branchIdFilter),
+    );
+  }
+
+  private async computeLeaderboard(
     userId: string,
     isSuperAdmin: boolean,
     branchIdFilter: string | null,
@@ -380,6 +422,15 @@ export class DashboardService {
   }
 
   async getAnomalies(managerUserId: string, isSuperAdmin: boolean) {
+    const dayKey = todayInVN().toISOString().slice(0, 10);
+    const scopeKey = isSuperAdmin ? 'admin' : `u:${managerUserId}`;
+    return this.memoize(
+      `dashboard:anomalies:${scopeKey}:${dayKey}`,
+      () => this.computeAnomalies(managerUserId, isSuperAdmin),
+    );
+  }
+
+  private async computeAnomalies(managerUserId: string, isSuperAdmin: boolean) {
     const today = todayInVN();
     const tomorrow = new Date(today);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);

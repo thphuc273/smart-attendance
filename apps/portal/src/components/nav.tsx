@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearAuth, getStoredUser, isAdmin, isManager, type ApiUser } from '../lib/api';
+import { NotificationBell } from './notification-bell';
 
 type Role = 'admin' | 'manager' | 'employee';
 
@@ -95,6 +96,7 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
             ))}
           </div>
         </div>
+        <NotificationBell popupClassName="left-0 bottom-full mb-2 origin-bottom-left" />
       </div>
       <button
         onClick={logout}
@@ -140,15 +142,18 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
             />
             <span className="text-sm font-semibold text-slate-900">Smart Attendance</span>
           </Link>
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="rounded-md p-2 hover:bg-slate-100"
-            aria-label="Mở menu"
-          >
-            <span className="block h-0.5 w-5 bg-slate-700" />
-            <span className="mt-1 block h-0.5 w-5 bg-slate-700" />
-            <span className="mt-1 block h-0.5 w-5 bg-slate-700" />
-          </button>
+          <div className="flex items-center gap-1">
+            {user && <NotificationBell />}
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="rounded-md p-2 hover:bg-slate-100"
+              aria-label="Mở menu"
+            >
+              <span className="block h-0.5 w-5 bg-slate-700" />
+              <span className="mt-1 block h-0.5 w-5 bg-slate-700" />
+              <span className="mt-1 block h-0.5 w-5 bg-slate-700" />
+            </button>
+          </div>
         </header>
       </div>
 
