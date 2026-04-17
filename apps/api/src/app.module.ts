@@ -16,6 +16,7 @@ import { QueueModule } from './modules/queue/queue.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ZeroTapModule } from './modules/zero-tap/zero-tap.module';
 import { KioskModule } from './modules/kiosk/kiosk.module';
 
@@ -52,6 +53,7 @@ import { KioskModule } from './modules/kiosk/kiosk.module';
     ReportsModule,
     WorkSchedulesModule,
     AuditLogsModule,
+    NotificationsModule,
     ZeroTapModule,
     KioskModule,
   ],
