@@ -29,4 +29,11 @@ export class DashboardController {
     const isSuperAdmin = user.roles.includes(RoleCode.admin);
     return this.dashboard.getManagerBranchDashboard(branchId, user.id, isSuperAdmin);
   }
+
+  @Get('anomalies')
+  @Roles(RoleCode.admin, RoleCode.manager)
+  getAnomalies(@CurrentUser() user: AuthenticatedUser) {
+    const isSuperAdmin = user.roles.includes(RoleCode.admin);
+    return this.dashboard.getAnomalies(user.id, isSuperAdmin);
+  }
 }

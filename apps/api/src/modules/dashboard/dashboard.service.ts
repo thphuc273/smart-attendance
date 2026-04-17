@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+const VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
+
 @Injectable()
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
@@ -8,30 +10,28 @@ export class DashboardService {
   async getAdminOverview() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const [totalActiveEmployees, totalActiveBranches, todaySummaries, heatmaps] = await Promise.all([
-      // Total active employees
-      this.prisma.employee.count({
-        where: { employmentStatus: 'active' },
-      }),
-      // Total active branches
-      this.prisma.branch.count({
-        where: { status: 'active' },
-      }),
-      // Today stats
+    const [totalActiveEmployees, totalActiveBranches, todaySummaries, heatmapRows] = await Promise.all([
+      this.prisma.employee.count({ where: { employmentStatus: 'active' } }),
+      this.prisma.branch.count({ where: { status: 'active' } }),
       this.prisma.dailyAttendanceSummary.findMany({
         where: { workDate: today },
         include: { branch: { select: { id: true, name: true } } },
       }),
-      // Heatmap (check-in events today)
-      this.prisma.attendanceEvent.findMany({
-        where: {
-          eventType: 'check_in',
-          status: 'success',
-          createdAt: { gte: today },
-        },
-        select: { createdAt: true },
-      }),
+      // Aggregate heatmap in DB — single scan via index (status, created_at)
+      this.prisma.$queryRaw<{ hour: number; count: bigint }[]>`
+        SELECT EXTRACT(HOUR FROM (created_at AT TIME ZONE ${VIETNAM_TZ}))::int AS hour,
+               COUNT(*) AS count
+        FROM attendance_events
+        WHERE event_type = 'check_in'
+          AND status = 'success'
+          AND created_at >= ${today}
+          AND created_at < ${tomorrow}
+        GROUP BY hour
+        ORDER BY hour
+      `,
     ]);
 
     // Aggregate today
@@ -71,20 +71,9 @@ export class DashboardService {
       .filter((b) => b.late_count > 0)
       .slice(0, 5);
 
-    // Prepare heatmap
-    const heatmapData: Record<number, number> = {};
-    for (let i = 0; i < 24; i++) heatmapData[i] = 0;
-
-    heatmaps.forEach((event) => {
-      // Vietnam timezone is UTC+7, simple approach:
-      const hour = (event.createdAt.getUTCHours() + 7) % 24;
-      heatmapData[hour]++;
-    });
-
-    const checkinHeatmap = Object.entries(heatmapData).map(([hour, count]) => ({
-      hour: parseInt(hour, 10),
-      count,
-    })).filter(h => h.count > 0);
+    const checkinHeatmap = heatmapRows
+      .map((r) => ({ hour: r.hour, count: Number(r.count) }))
+      .filter((h) => h.count > 0);
 
     return {
       total_employees: totalActiveEmployees,
@@ -223,6 +212,142 @@ export class DashboardService {
       },
       low_trust_today: lowTrustMap,
       week_trend: weekTrend,
+    };
+  }
+
+  async getAnomalies(managerUserId: string, isSuperAdmin: boolean) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+
+    let scopedBranchIds: string[] | null = null;
+    if (!isSuperAdmin) {
+      const managed = await this.prisma.managerBranch.findMany({
+        where: { userId: managerUserId },
+        select: { branchId: true },
+      });
+      scopedBranchIds = managed.map((m) => m.branchId);
+      if (scopedBranchIds.length === 0) {
+        return {
+          data: {
+            branches_late_spike: [],
+            employees_low_trust: [],
+            untrusted_devices_new_today: 0,
+          },
+        };
+      }
+    }
+
+    const branchFilter = scopedBranchIds ? { branchId: { in: scopedBranchIds } } : {};
+
+    // 1. Branches: today's late_rate vs 7-day avg (spike when ratio > 2x)
+    const [todayByBranch, weekByBranch, branches] = await Promise.all([
+      this.prisma.dailyAttendanceSummary.groupBy({
+        by: ['branchId', 'status'],
+        where: { workDate: today, ...branchFilter },
+        _count: { _all: true },
+      }),
+      this.prisma.dailyAttendanceSummary.groupBy({
+        by: ['branchId', 'status'],
+        where: {
+          workDate: { gte: weekAgo, lt: today },
+          ...branchFilter,
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.branch.findMany({
+        where: scopedBranchIds ? { id: { in: scopedBranchIds } } : {},
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    type Agg = { total: number; late: number };
+    const aggByBranch = (rows: typeof todayByBranch): Map<string, Agg> => {
+      const map = new Map<string, Agg>();
+      for (const r of rows) {
+        const bucket = map.get(r.branchId) ?? { total: 0, late: 0 };
+        bucket.total += r._count._all;
+        if (r.status === 'late') bucket.late += r._count._all;
+        map.set(r.branchId, bucket);
+      }
+      return map;
+    };
+
+    const todayAgg = aggByBranch(todayByBranch);
+    const weekAgg = aggByBranch(weekByBranch);
+    const branchById = new Map(branches.map((b) => [b.id, b]));
+
+    const branchesLateSpike = Array.from(todayAgg.entries())
+      .map(([branchId, td]) => {
+        const wk = weekAgg.get(branchId);
+        const lateRateToday = td.total > 0 ? td.late / td.total : 0;
+        const lateRateAvg7d = wk && wk.total > 0 ? wk.late / wk.total : 0;
+        const spikeRatio = lateRateAvg7d > 0 ? lateRateToday / lateRateAvg7d : lateRateToday > 0 ? Infinity : 0;
+        return {
+          branch_id: branchId,
+          name: branchById.get(branchId)?.name ?? 'Unknown',
+          late_rate_today: Number(lateRateToday.toFixed(3)),
+          late_rate_avg_7d: Number(lateRateAvg7d.toFixed(3)),
+          spike_ratio: Number.isFinite(spikeRatio) ? Number(spikeRatio.toFixed(2)) : null,
+        };
+      })
+      .filter(
+        (b) =>
+          b.late_rate_today >= 0.05 &&
+          (b.spike_ratio === null || (b.spike_ratio !== null && b.spike_ratio >= 2)),
+      )
+      .sort((a, b) => (b.spike_ratio ?? 99) - (a.spike_ratio ?? 99))
+      .slice(0, 10);
+
+    // 2. Employees with ≥3 low-trust sessions in last 7 days
+    const lowTrustSessions = await this.prisma.attendanceSession.groupBy({
+      by: ['employeeId'],
+      where: {
+        workDate: { gte: weekAgo, lt: tomorrow },
+        trustScore: { lt: 40, not: null },
+        ...(scopedBranchIds ? { branchId: { in: scopedBranchIds } } : {}),
+      },
+      _count: { _all: true },
+      having: { employeeId: { _count: { gte: 3 } } },
+    });
+
+    const lowTrustEmployees = lowTrustSessions.length
+      ? await this.prisma.employee.findMany({
+          where: { id: { in: lowTrustSessions.map((s) => s.employeeId) } },
+          select: { id: true, employeeCode: true },
+        })
+      : [];
+    const employeeById = new Map(lowTrustEmployees.map((e) => [e.id, e]));
+
+    const employeesLowTrust = lowTrustSessions
+      .map((s) => ({
+        employee_id: s.employeeId,
+        code: employeeById.get(s.employeeId)?.employeeCode ?? 'unknown',
+        low_trust_count_7d: s._count._all,
+      }))
+      .sort((a, b) => b.low_trust_count_7d - a.low_trust_count_7d)
+      .slice(0, 20);
+
+    // 3. New untrusted devices today (within scope)
+    const untrustedDevicesNewToday = await this.prisma.employeeDevice.count({
+      where: {
+        isTrusted: false,
+        createdAt: { gte: today, lt: tomorrow },
+        ...(scopedBranchIds
+          ? { employee: { primaryBranchId: { in: scopedBranchIds } } }
+          : {}),
+      },
+    });
+
+    return {
+      data: {
+        branches_late_spike: branchesLateSpike,
+        employees_low_trust: employeesLowTrust,
+        untrusted_devices_new_today: untrustedDevicesNewToday,
+      },
     };
   }
 }
