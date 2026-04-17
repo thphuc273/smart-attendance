@@ -117,7 +117,7 @@ export class DashboardService {
     const weekAgo = new Date(today);
     weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
-    const [branchEmployees, todaySessions, lowTrustToday, weekSummaries] = await Promise.all([
+    const [branchEmployees, todaySessions, lowTrustToday, weekSessions] = await Promise.all([
       this.prisma.employee.count({
         where: { primaryBranchId: branchId, employmentStatus: 'active' },
       }),
@@ -138,7 +138,8 @@ export class DashboardService {
           },
         },
       }),
-      this.prisma.dailyAttendanceSummary.findMany({
+      // Read from sessions directly — works before cron populates summaries
+      this.prisma.attendanceSession.findMany({
         where: {
           branchId,
           workDate: { gte: weekAgo, lt: today },
@@ -147,19 +148,20 @@ export class DashboardService {
       }),
     ]);
 
-    // Aggregate today
+    // Aggregate today — checkedIn requires non-null checkInAt
     let checkedIn = 0;
     let onTime = 0;
     let late = 0;
     let absentCount = 0;
-    let notYet = branchEmployees - todaySessions.length;
 
     todaySessions.forEach((s) => {
-      checkedIn++;
+      if (s.checkInAt) checkedIn++;
       if (s.status === 'on_time') onTime++;
       else if (s.status === 'late') late++;
       else if (s.status === 'absent') absentCount++;
     });
+
+    const notYet = Math.max(0, branchEmployees - checkedIn - absentCount);
 
     // Low trust mapping
     const lowTrustMap = lowTrustToday.map((s) => {
@@ -182,15 +184,15 @@ export class DashboardService {
       };
     });
 
-    // Week trend
+    // Week trend — bucket by VN calendar day
     const trendMap: Record<string, { total: number; onTime: number }> = {};
     for (let d = 1; d <= 7; d++) {
       const date = new Date(today);
-      date.setDate(date.getDate() - d);
+      date.setUTCDate(date.getUTCDate() - d);
       trendMap[date.toISOString().split('T')[0]] = { total: 0, onTime: 0 };
     }
 
-    weekSummaries.forEach((s) => {
+    weekSessions.forEach((s) => {
       const dateStr = s.workDate.toISOString().split('T')[0];
       if (trendMap[dateStr]) {
         trendMap[dateStr].total++;

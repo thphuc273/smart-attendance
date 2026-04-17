@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { isAdmin } from '../../lib/api';
@@ -36,16 +37,60 @@ interface AnomaliesResp {
   };
 }
 
+interface ManagerDashboard {
+  data: {
+    branch: { id: string; name: string };
+    today: {
+      total: number;
+      checked_in: number;
+      not_yet: number;
+      absent: number;
+      on_time: number;
+      late: number;
+    };
+    low_trust_today: {
+      session_id: string;
+      employee: { code: string; name: string };
+      trust_score: number;
+      risk_flags: string[];
+    }[];
+    week_trend: { date: string; on_time_rate: number }[];
+  };
+}
+
+interface Branch {
+  id: string;
+  name: string;
+}
+
 export default function DashboardPage() {
   const user = useRequireAuth('manager');
   const admin = isAdmin(user);
 
   const anomaliesQ = useApiQuery<AnomaliesResp>(queryKeys.anomalies(), 'dashboard/anomalies', !!user);
   const overviewQ = useApiQuery<AdminOverview>(queryKeys.dashboardAdmin(), 'dashboard/admin/overview', !!user && admin);
+  const branchesQ = useApiQuery<{ data: Branch[] }>(
+    queryKeys.branches({ limit: 100 }),
+    'branches?limit=100',
+    !!user && !admin, // only fetch for non-admin (manager)
+  );
+
+  const managerBranches = branchesQ.data?.data ?? [];
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  // Default selected branch = first in list when loaded
+  const currentBranchId = selectedBranchId ?? managerBranches[0]?.id ?? null;
+
+  const managerDashQ = useApiQuery<ManagerDashboard>(
+    currentBranchId ? queryKeys.dashboardManager(currentBranchId) : ['dashboard', 'manager', 'none'],
+    currentBranchId ? `dashboard/manager/${currentBranchId}` : 'dashboard/manager/none',
+    !!user && !admin && !!currentBranchId,
+  );
 
   const anomalies = anomaliesQ.data?.data ?? null;
   const overview = overviewQ.data?.data ?? null;
-  const error = anomaliesQ.error?.message ?? overviewQ.error?.message ?? null;
+  const managerDash = managerDashQ.data?.data ?? null;
+  const error =
+    anomaliesQ.error?.message ?? overviewQ.error?.message ?? managerDashQ.error?.message ?? null;
 
   if (!user) return null;
 
@@ -153,6 +198,94 @@ export default function DashboardPage() {
               <h3 className="text-sm font-semibold text-slate-900">Check-in heatmap (giờ VN)</h3>
               <Heatmap data={overview.checkin_heatmap} />
             </div>
+          </section>
+        )}
+
+        {!admin && (
+          <section className="mt-2">
+            {managerBranches.length > 1 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {managerBranches.map((b) => {
+                  const active = b.id === currentBranchId;
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => setSelectedBranchId(b.id)}
+                      className={
+                        active
+                          ? 'rounded-full bg-gradient-to-r from-brand-600 to-violet-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm'
+                          : 'rounded-full border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-brand-50'
+                      }
+                    >
+                      {b.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {managerDash && (
+              <>
+                <h2 className="mb-3 text-xl font-bold text-slate-900">
+                  📍 {managerDash.branch.name}
+                </h2>
+
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <StatTile label="Tổng NV" value={managerDash.today.total} icon="👥" tone="brand" />
+                  <StatTile label="Đã check-in" value={managerDash.today.checked_in} icon="✅" tone="teal" />
+                  <StatTile label="Chưa đến" value={managerDash.today.not_yet} icon="⏳" tone="amber" />
+                  <StatTile label="Vắng" value={managerDash.today.absent} icon="❌" tone="rose" />
+                </div>
+
+                <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="card">
+                    <h3 className="text-sm font-semibold text-slate-900">Trạng thái hôm nay</h3>
+                    <div className="mt-4 space-y-3">
+                      <StatusRow label="Đúng giờ" count={managerDash.today.on_time} tone="emerald" />
+                      <StatusRow label="Đi muộn" count={managerDash.today.late} tone="amber" />
+                      <StatusRow label="Vắng" count={managerDash.today.absent} tone="rose" />
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <h3 className="text-sm font-semibold text-slate-900">📈 Tỉ lệ đúng giờ 7 ngày</h3>
+                    <WeekTrend data={managerDash.week_trend} />
+                  </div>
+                </div>
+
+                <div className="mt-6 card">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    ⚠️ Trust thấp hôm nay ({managerDash.low_trust_today.length})
+                  </h3>
+                  {managerDash.low_trust_today.length === 0 ? (
+                    <p className="mt-3 text-xs text-slate-400">Không có cảnh báo 👌</p>
+                  ) : (
+                    <ul className="mt-3 divide-y divide-slate-100">
+                      {managerDash.low_trust_today.map((s) => (
+                        <li key={s.session_id} className="flex items-center justify-between py-2 text-sm">
+                          <div>
+                            <div className="font-medium text-slate-900">{s.employee.name}</div>
+                            <div className="text-xs text-slate-500">
+                              {s.employee.code}
+                              {s.risk_flags.length > 0 && ` · ${s.risk_flags.join(', ')}`}
+                            </div>
+                          </div>
+                          <span
+                            className={
+                              s.trust_score < 40
+                                ? 'rounded-full bg-rose-100 px-2 py-0.5 font-mono text-xs font-semibold text-rose-700'
+                                : 'rounded-full bg-amber-100 px-2 py-0.5 font-mono text-xs font-semibold text-amber-700'
+                            }
+                          >
+                            {s.trust_score}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
           </section>
         )}
 
@@ -317,6 +450,30 @@ function AnomalyCard({
         </span>
       </div>
       <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function WeekTrend({ data }: { data: { date: string; on_time_rate: number }[] }) {
+  if (data.length === 0) {
+    return <p className="mt-3 text-xs text-slate-400">Chưa có dữ liệu.</p>;
+  }
+  return (
+    <div className="mt-4 flex h-24 items-end gap-1.5">
+      {data.map((d) => {
+        const pct = d.on_time_rate;
+        const label = new Date(d.date).toLocaleDateString('vi-VN', { weekday: 'short' });
+        return (
+          <div key={d.date} className="flex flex-1 flex-col items-center gap-1" title={`${d.date}: ${(pct * 100).toFixed(0)}%`}>
+            <div
+              className="w-full rounded-t-md bg-gradient-to-t from-brand-500 to-violet-400"
+              style={{ height: `${Math.max(pct * 100, 4)}%`, opacity: 0.3 + 0.7 * pct }}
+            />
+            <span className="text-[10px] font-medium text-slate-400">{label}</span>
+            <span className="text-[9px] text-slate-500">{(pct * 100).toFixed(0)}%</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
