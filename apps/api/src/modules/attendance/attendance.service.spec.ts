@@ -2,7 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { ScheduleService } from './schedule.service';
+import { BranchesService } from '../branches/branches.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('AttendanceService - overrideSession', () => {
   let service: AttendanceService;
@@ -38,6 +40,20 @@ describe('AttendanceService - overrideSession', () => {
             isWorkday: jest.fn(),
           },
         },
+        {
+          provide: BranchesService,
+          useValue: {
+            getConfigCached: jest.fn(),
+            loadConfigsCached: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          provide: NotificationsService,
+          useValue: {
+            create: jest.fn().mockResolvedValue(undefined),
+            createMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+        },
       ],
     }).compile();
 
@@ -56,6 +72,9 @@ describe('AttendanceService - overrideSession', () => {
         branchId,
         status: 'absent',
         note: null,
+        workDate: new Date('2026-04-15'),
+        employee: { user: { id: 'user-emp-1' } },
+        branch: { name: 'HCM-Q1' },
       });
 
       prisma.attendanceSession.update.mockResolvedValueOnce({ id: sessionId, status: 'late' });
