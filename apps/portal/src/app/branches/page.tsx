@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi, isAdmin } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Branch {
   id: string;
@@ -24,42 +26,31 @@ interface ListResp {
 
 export default function BranchesPage() {
   const user = useRequireAuth('manager');
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const qc = useQueryClient();
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [detailOf, setDetailOf] = useState<Branch | null>(null);
   const [creating, setCreating] = useState(false);
 
   const admin = isAdmin(user);
 
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (search) params.set('search', search);
-        if (statusFilter) params.set('status', statusFilter);
-        const resp = await api.get(`branches?${params}`).json<ListResp>();
-        setBranches(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [search, statusFilter, user],
-  );
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (search) params.set('search', search);
+  if (statusFilter) params.set('status', statusFilter);
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const listQ = useApiQuery<ListResp>(
+    queryKeys.branches({ page, search, statusFilter }),
+    `branches?${params}`,
+    !!user,
+  );
+  const branches = listQ.data?.data ?? [];
+  const meta = listQ.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = listQ.isLoading || listQ.isFetching;
+  const error = listQ.error?.message ?? null;
+
+  const load = (p: number) => setPage(p);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['branches'] });
 
   if (!user) return null;
 
@@ -69,7 +60,7 @@ export default function BranchesPage() {
       <main className="mx-auto max-w-6xl p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Branches</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Branches</h1>
             <p className="mt-1 text-sm text-slate-600">
               Quản lý chi nhánh, WiFi whitelist và geofence.{' '}
               {!admin && <span className="text-amber-600">(manager: chỉ xem scope của mình)</span>}
@@ -78,7 +69,7 @@ export default function BranchesPage() {
           {admin && (
             <button
               onClick={() => setCreating(true)}
-              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+              className="btn-primary"
             >
               + New branch
             </button>
@@ -89,13 +80,13 @@ export default function BranchesPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            setPage(1);
           }}
         >
           <label className="text-sm">
             <span className="text-slate-600">Search (code/name)</span>
             <input
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="HCM-Q1"
@@ -104,7 +95,7 @@ export default function BranchesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Status</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
@@ -114,16 +105,16 @@ export default function BranchesPage() {
               <option value="closed">closed</option>
             </select>
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-4 overflow-x-auto rounded-2xl bg-white shadow-card">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-3 py-2">Code</th>
                 <th className="px-3 py-2">Name</th>
@@ -164,7 +155,7 @@ export default function BranchesPage() {
                   <td className="px-3 py-2">
                     <button
                       onClick={() => setDetailOf(b)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                     >
                       Detail
                     </button>
@@ -183,7 +174,7 @@ export default function BranchesPage() {
           branch={detailOf}
           canEdit={admin}
           onClose={() => setDetailOf(null)}
-          onMutate={() => load(meta.page)}
+          onMutate={refresh}
         />
       )}
 
@@ -192,7 +183,7 @@ export default function BranchesPage() {
           onClose={() => setCreating(false)}
           onSuccess={() => {
             setCreating(false);
-            load(1);
+            setPage(1);
           }}
         />
       )}
@@ -207,7 +198,7 @@ function StatusBadge({ status }: { status: string }) {
       : status === 'inactive'
         ? 'bg-slate-100 text-slate-700'
         : 'bg-red-100 text-red-700';
-  return <span className={`rounded px-2 py-0.5 text-xs ${tone}`}>{status}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{status}</span>;
 }
 
 function Pagination({ meta, onChange }: { meta: ListResp['meta']; onChange: (p: number) => void }) {
@@ -433,7 +424,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <label className="block">
         <span className="text-slate-600">Name</span>
         <input
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
         />
@@ -441,7 +432,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <label className="block">
         <span className="text-slate-600">Address</span>
         <input
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.address}
           onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
         />
@@ -452,7 +443,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
           type="number"
           min={10}
           max={5000}
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.radius_meters}
           onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
         />
@@ -460,7 +451,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <label className="block">
         <span className="text-slate-600">Status</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.status}
           onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Branch['status'] }))}
         >
@@ -473,7 +464,7 @@ function EditForm({ branch, onSuccess }: { branch: BranchDetail; onSuccess: () =
       <button
         type="submit"
         disabled={submitting}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className="btn-primary"
       >
         {submitting ? 'Saving…' : 'Save'}
       </button>
@@ -538,26 +529,26 @@ function WifiSection({
       {adding && (
         <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="SSID (ví dụ: Office-5G)"
             value={form.ssid}
             onChange={(e) => setForm((f) => ({ ...f, ssid: e.target.value }))}
           />
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-mono"
             placeholder="BSSID aa:bb:cc:dd:ee:ff (optional)"
             value={form.bssid}
             onChange={(e) => setForm((f) => ({ ...f, bssid: e.target.value }))}
           />
           <input
             type="number"
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Priority"
             value={form.priority}
             onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
           />
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Notes"
             value={form.notes}
             onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
@@ -565,7 +556,7 @@ function WifiSection({
           {error && <p className="text-xs text-red-600">{error}</p>}
           <button
             onClick={submit}
-            className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+            className="btn-primary py-1 text-xs"
           >
             Add
           </button>
@@ -661,7 +652,7 @@ function GeofenceSection({
       {adding && (
         <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
           <input
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Name (ví dụ: Main entrance)"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -670,7 +661,7 @@ function GeofenceSection({
             <input
               type="number"
               step="any"
-              className="block w-full rounded border border-slate-300 px-2 py-1"
+              className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="Latitude"
               value={form.center_lat}
               onChange={(e) => setForm((f) => ({ ...f, center_lat: Number(e.target.value) }))}
@@ -678,7 +669,7 @@ function GeofenceSection({
             <input
               type="number"
               step="any"
-              className="block w-full rounded border border-slate-300 px-2 py-1"
+              className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="Longitude"
               value={form.center_lng}
               onChange={(e) => setForm((f) => ({ ...f, center_lng: Number(e.target.value) }))}
@@ -688,7 +679,7 @@ function GeofenceSection({
             type="number"
             min={10}
             max={5000}
-            className="block w-full rounded border border-slate-300 px-2 py-1"
+            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="Radius (m)"
             value={form.radius_meters}
             onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
@@ -696,7 +687,7 @@ function GeofenceSection({
           {error && <p className="text-xs text-red-600">{error}</p>}
           <button
             onClick={submit}
-            className="rounded bg-slate-900 px-3 py-1 text-xs text-white"
+            className="btn-primary py-1 text-xs"
           >
             Add
           </button>
@@ -735,13 +726,38 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     code: '',
     name: '',
     address: '',
-    latitude: 10.7769,
-    longitude: 106.7009,
+    latitude: '' as number | '',
+    longitude: '' as number | '',
     radius_meters: 150,
     timezone: 'Asia/Ho_Chi_Minh',
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setError('Trình duyệt không hỗ trợ Geolocation');
+      return;
+    }
+    setGeoLoading(true);
+    setError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setForm((f) => ({
+          ...f,
+          latitude: Number(pos.coords.latitude.toFixed(6)),
+          longitude: Number(pos.coords.longitude.toFixed(6)),
+        }));
+        setGeoLoading(false);
+      },
+      (err) => {
+        setError(`Không lấy được vị trí: ${err.message}`);
+        setGeoLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15_000 },
+    );
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -771,7 +787,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Tạo chi nhánh mới</h2>
@@ -780,7 +796,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <span className="text-slate-600">Code (unique)</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="HCM-Q1"
             value={form.code}
             onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
@@ -791,7 +807,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <span className="text-slate-600">Name</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           />
@@ -800,35 +816,60 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
         <label className="block text-sm">
           <span className="text-slate-600">Address</span>
           <input
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.address}
             onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
           />
         </label>
 
-        <div className="flex gap-2">
-          <label className="block flex-1 text-sm">
-            <span className="text-slate-600">Latitude</span>
-            <input
-              type="number"
-              step="any"
-              required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
-              value={form.latitude}
-              onChange={(e) => setForm((f) => ({ ...f, latitude: Number(e.target.value) }))}
-            />
-          </label>
-          <label className="block flex-1 text-sm">
-            <span className="text-slate-600">Longitude</span>
-            <input
-              type="number"
-              step="any"
-              required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
-              value={form.longitude}
-              onChange={(e) => setForm((f) => ({ ...f, longitude: Number(e.target.value) }))}
-            />
-          </label>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-sm text-slate-600">Toạ độ chi nhánh</span>
+            <button
+              type="button"
+              onClick={useCurrentLocation}
+              disabled={geoLoading}
+              className="rounded-md bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100 disabled:opacity-50"
+            >
+              {geoLoading ? 'Đang lấy…' : '📍 Dùng vị trí hiện tại'}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <label className="block flex-1 text-sm">
+              <span className="text-[11px] text-slate-500">Latitude</span>
+              <input
+                type="number"
+                step="any"
+                required
+                placeholder="10.776900"
+                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                value={form.latitude}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    latitude: e.target.value === '' ? '' : Number(e.target.value),
+                  }))
+                }
+              />
+            </label>
+            <label className="block flex-1 text-sm">
+              <span className="text-[11px] text-slate-500">Longitude</span>
+              <input
+                type="number"
+                step="any"
+                required
+                placeholder="106.700900"
+                className="mt-0.5 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                value={form.longitude}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    longitude: e.target.value === '' ? '' : Number(e.target.value),
+                  }))
+                }
+              />
+            </label>
+          </div>
         </div>
 
         <label className="block text-sm">
@@ -837,7 +878,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
             type="number"
             min={10}
             max={5000}
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.radius_meters}
             onChange={(e) => setForm((f) => ({ ...f, radius_meters: Number(e.target.value) }))}
           />
@@ -856,7 +897,7 @@ function CreateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           <button
             type="submit"
             disabled={submitting}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            className="btn-primary"
           >
             {submitting ? 'Creating…' : 'Create'}
           </button>

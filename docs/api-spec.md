@@ -48,8 +48,18 @@
 - `page` (default 1), `limit` (default 20, max 100)
 - `sort` = `field:asc|desc`, ví dụ `?sort=created_at:desc`
 - Filter: `?branch_id=...&date_from=2026-04-01&date_to=2026-04-30&status=late`
+- Date fields (`date_from`, `date_to`, `effective_from`, `effective_to`): chỉ nhận **`YYYY-MM-DD`**, năm trong `[2000, 2100]`. Chuỗi không match → 400 `VALIDATION_ERROR`.
 
-### 1.4 Auth header
+### 1.4 Internal: `ResponseTransformInterceptor` contract
+
+Service backend trả **raw object** hoặc **`{ items: T[], meta }`** cho paginated.
+Interceptor tự wrap:
+- Paginated → `{ data: items, meta }`
+- Raw → `{ data: <raw> }`
+
+**KHÔNG** tự wrap `{ data: ... }` trong service — sẽ double-wrap thành `{ data: { data: ... } }` và vỡ client.
+
+### 1.5 Auth header
 
 ```
 Authorization: Bearer <access_token>
@@ -201,8 +211,7 @@ Filter: `?branch_id=...&department_id=...&status=active&search=...`
 ```
 
 ### POST `/employees`
-**Role:** admin
-Tạo user + employee atomic.
+**Role:** admin, manager. Tạo user + employee atomic.
 ```json
 {
   "email": "new@demo.com",
@@ -215,8 +224,14 @@ Tạo user + employee atomic.
   "role": "employee"
 }
 ```
+Scope: manager chỉ tạo được nếu `primary_branch_id` thuộc `managed_branch_ids`; chỉ tạo role `employee` (403 `ROLE_ESCALATION_BLOCKED` nếu thử tạo manager/admin).
 
 ### PATCH `/employees/:id`
+**Role:** admin, manager. Manager chỉ update được employee đang trong scope branch của mình; nếu update `primary_branch_id`, branch mới cũng phải trong scope.
+
+### DELETE `/employees/:id`
+**Role:** admin, manager (scoped). Soft-delete: `employment_status → terminated`, `user.status → inactive` (disable login). Attendance history giữ nguyên. Response 204.
+
 ### POST `/employees/:id/assignments`
 ```json
 { "branch_id": "uuid", "assignment_type": "secondary",
@@ -613,27 +628,71 @@ Stream CSV.
 
 ## 8. Work schedules module
 
+**Roles:** `GET` admin+manager; `POST`/`DELETE` admin.
+
 ### GET `/work-schedules`
-### POST `/work-schedules`
 ```json
 {
-  "name": "Standard 8-5",
-  "start_time": "08:00",
-  "end_time": "17:00",
-  "grace_minutes": 10,
-  "overtime_after_minutes": 60,
-  "workdays": [1, 2, 3, 4, 5]
+  "data": [
+    {
+      "id": "uuid",
+      "name": "Standard 8-5",
+      "start_time": "08:00",
+      "end_time": "17:00",
+      "grace_minutes": 10,
+      "overtime_after_minutes": 60,
+      "workdays": [1, 2, 3, 4, 5],
+      "assignment_count": 30,
+      "created_at": "2026-04-16T09:00:00Z"
+    }
+  ]
 }
 ```
 
+### POST `/work-schedules`
+```json
+// Request
+{
+  "name": "Night shift",
+  "start_time": "22:00",
+  "end_time": "06:00",
+  "grace_minutes": 15,
+  "overtime_after_minutes": 60,
+  "workdays": [1, 2, 3, 4, 5]
+}
+// Response 201: schedule object
+```
+Validation: `end_time` phải sau `start_time` (reject 409 `INVALID_SCHEDULE`); `workdays` 1-7, non-empty.
+
 ### POST `/work-schedules/:id/assign`
 ```json
+// Request
 {
   "employee_id": "uuid",
   "effective_from": "2026-04-15",
-  "effective_to": null
+  "effective_to": "2026-06-15"   // optional, null = infinite
+}
+// Response 201: assignment object
+```
+Validation: `effective_from` và `effective_to` phải `YYYY-MM-DD`, năm trong `[2000, 2100]`, ngày hợp lệ. `effective_to` (nếu có) phải >= `effective_from` (reject 409 `INVALID_RANGE`).
+
+### GET `/work-schedules/:id/assignments`
+List 200 assignments gần nhất của ca, sort theo `effective_from` desc.
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "effective_from": "2026-04-15T00:00:00Z",
+      "effective_to": null,
+      "employee": { "id": "uuid", "employee_code": "EMP001", "full_name": "Nguyễn Văn A" }
+    }
+  ]
 }
 ```
+
+### DELETE `/work-schedules/:id/assignments/:assignmentId`
+Response 204. Trả 404 nếu assignment không thuộc schedule.
 
 ---
 
@@ -666,6 +725,7 @@ Filter: `?user_id=...&entity_type=branch&date_from=...`
 | `TOKEN_EXPIRED` | 401 | Access token hết hạn |
 | `INSUFFICIENT_PERMISSION` | 403 | Sai role |
 | `BRANCH_OUT_OF_SCOPE` | 403 | Manager truy cập branch không thuộc quyền |
+| `ROLE_ESCALATION_BLOCKED` | 403 | Manager thử tạo/thăng cấp user role = manager/admin |
 | `RESOURCE_NOT_FOUND` | 404 | |
 | `ALREADY_CHECKED_IN` | 409 | Đã có session success hôm nay |
 | `ALREADY_CHECKED_OUT` | 409 | |
@@ -673,7 +733,9 @@ Filter: `?user_id=...&entity_type=branch&date_from=...`
 | `INVALID_LOCATION` | 422 | Cả GPS và WiFi đều không pass |
 | `NOT_ASSIGNED_TO_BRANCH` | 422 | Nhân viên không có assignment active với chi nhánh phát hiện |
 | `MOCK_LOCATION_DETECTED` | 422 | Block trong môi trường strict |
-| `VALIDATION_ERROR` | 400 | Body không hợp lệ (DTO) |
+| `VALIDATION_ERROR` | 400 | Body không hợp lệ (DTO). Date fields bắt buộc `YYYY-MM-DD`, năm 2000-2100. |
+| `INVALID_SCHEDULE` | 409 | Work schedule `end_time <= start_time` |
+| `INVALID_RANGE` | 409 | `effective_to` < `effective_from` |
 | `RATE_LIMIT_EXCEEDED` | 429 | |
 | `ATTESTATION_FAILED` | 401 | Play Integrity / App Attest token sai hoặc hết hạn |
 | `ZERO_TAP_NOT_CONSENTED` | 403 | Device chưa opt-in zero-tap |

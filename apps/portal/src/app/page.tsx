@@ -26,7 +26,7 @@ export default function HomePage() {
         </code>
       </p>
       <div className="mt-8 space-y-3">
-        <Link href="/login" className="block rounded-md bg-slate-900 px-4 py-2 text-white">
+        <Link href="/login" className="block rounded-lg bg-gradient-to-r from-brand-600 to-violet-600 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm">
           Đăng nhập
         </Link>
       </div>

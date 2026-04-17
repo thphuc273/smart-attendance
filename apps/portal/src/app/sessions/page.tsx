@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi } from '../../lib/api';
+import { useApiQuery, useApiMutation, queryKeys } from '../../lib/queries';
 
 interface Session {
   id: string;
@@ -28,44 +29,29 @@ const STATUSES = ['on_time', 'late', 'early_leave', 'overtime', 'missing_checkou
 
 export default function SessionsPage() {
   const user = useRequireAuth('manager');
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({
-    total: 0,
-    page: 1,
-    limit: 20,
-    total_pages: 1,
-  });
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ status: '', date_from: '', date_to: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [overrideOf, setOverrideOf] = useState<Session | null>(null);
 
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (filters.status) params.set('status', filters.status);
-        if (filters.date_from) params.set('date_from', filters.date_from);
-        if (filters.date_to) params.set('date_to', filters.date_to);
-        const resp = await api.get(`attendance/sessions?${params}`).json<ListResp>();
-        setSessions(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, user],
-  );
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (filters.status) params.set('status', filters.status);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const query = useApiQuery<ListResp>(
+    queryKeys.sessions({ page, ...filters }),
+    `attendance/sessions?${params}`,
+    !!user,
+  );
+  const sessions = query.data?.data ?? [];
+  const meta = query.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = query.isLoading || query.isFetching;
+  const error = query.error?.message ?? null;
+
+  const applyFilters = () => {
+    setPage(1);
+  };
+  const load = (p: number) => setPage(p);
 
   if (!user) return null;
 
@@ -73,7 +59,7 @@ export default function SessionsPage() {
     <>
       <TopNav />
       <main className="mx-auto max-w-6xl p-6">
-        <h1 className="text-2xl font-bold">Sessions</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Sessions</h1>
         <p className="mt-1 text-sm text-slate-600">
           Lịch sử chấm công — admin/manager có thể override status.
         </p>
@@ -82,20 +68,20 @@ export default function SessionsPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            applyFilters();
           }}
         >
           <label className="text-sm">
             <span className="text-slate-600">Status</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.status}
               onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
             >
               <option value="">(tất cả)</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {STATUS_LABEL[s] ?? s}
                 </option>
               ))}
             </select>
@@ -104,7 +90,7 @@ export default function SessionsPage() {
             <span className="text-slate-600">From</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_from}
               onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value }))}
             />
@@ -113,21 +99,21 @@ export default function SessionsPage() {
             <span className="text-slate-600">To</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_to}
               onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value }))}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-4 overflow-x-auto rounded-2xl bg-white shadow-card">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Employee</th>
@@ -186,7 +172,7 @@ export default function SessionsPage() {
                   <td className="px-3 py-2">
                     <button
                       onClick={() => setOverrideOf(s)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                     >
                       Override
                     </button>
@@ -204,28 +190,40 @@ export default function SessionsPage() {
         <OverrideModal
           session={overrideOf}
           onClose={() => setOverrideOf(null)}
-          onSuccess={() => {
-            setOverrideOf(null);
-            load(meta.page);
-          }}
+          onSuccess={() => setOverrideOf(null)}
         />
       )}
     </>
   );
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  on_time: 'Đúng giờ',
+  late: 'Đi muộn',
+  overtime: 'Làm thêm giờ',
+  early_leave: 'Về sớm',
+  absent: 'Vắng',
+  missing_checkout: 'Chưa check-out',
+};
+
 function StatusBadge({ status }: { status: string }) {
   const tone =
     status === 'on_time'
-      ? 'bg-green-100 text-green-700'
+      ? 'bg-emerald-100 text-emerald-700'
       : status === 'late'
         ? 'bg-amber-100 text-amber-700'
         : status === 'overtime'
           ? 'bg-sky-100 text-sky-700'
-          : status === 'absent' || status === 'missing_checkout'
-            ? 'bg-red-100 text-red-700'
-            : 'bg-slate-100 text-slate-700';
-  return <span className={`rounded px-2 py-0.5 text-xs ${tone}`}>{status}</span>;
+          : status === 'early_leave'
+            ? 'bg-rose-100 text-rose-700'
+            : status === 'absent' || status === 'missing_checkout'
+              ? 'bg-rose-100 text-rose-700'
+              : 'bg-slate-100 text-slate-700';
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
+      {STATUS_LABEL[status] ?? status}
+    </span>
+  );
 }
 
 function TrustBadge({ score }: { score: number | null }) {
@@ -271,25 +269,23 @@ function OverrideModal({
 }) {
   const [status, setStatus] = useState(session.status);
   const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
 
-  const submit = async () => {
+  const mutation = useApiMutation(
+    async (payload: { status: string; note: string }) =>
+      getApi().patch(`attendance/sessions/${session.id}`, { json: payload }).json<unknown>(),
+    [queryKeys.sessions(), queryKeys.auditLogs(), queryKeys.anomalies()],
+  );
+  const submitting = mutation.isPending;
+  const error = clientError ?? mutation.error?.message ?? null;
+
+  const submit = () => {
     if (note.trim().length < 3) {
-      setError('Note tối thiểu 3 ký tự');
+      setClientError('Note tối thiểu 3 ký tự');
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const api = getApi();
-      await api.patch(`attendance/sessions/${session.id}`, { json: { status, note } });
-      onSuccess();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    setClientError(null);
+    mutation.mutate({ status, note }, { onSuccess });
   };
 
   return (
@@ -308,11 +304,11 @@ function OverrideModal({
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1.5"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20.5"
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {STATUS_LABEL[s] ?? s}
               </option>
             ))}
           </select>
@@ -324,7 +320,7 @@ function OverrideModal({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1.5"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20.5"
             placeholder="Lý do override..."
           />
         </label>
@@ -338,7 +334,7 @@ function OverrideModal({
           <button
             onClick={submit}
             disabled={submitting}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            className="btn-primary"
           >
             {submitting ? 'Saving…' : 'Save override'}
           </button>

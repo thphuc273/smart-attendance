@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -162,7 +163,14 @@ export default function CheckInScreen() {
       refreshControl={<RefreshControl refreshing={false} onRefresh={loadToday} />}
     >
       <View style={styles.header}>
-        <Text style={styles.title}>Chấm công</Text>
+        <View style={styles.brand}>
+          <Image
+            source={require('../assets/finos-logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.title}>Chấm công</Text>
+        </View>
         <Pressable onPress={logout} hitSlop={8}>
           <Text style={styles.logout}>Logout</Text>
         </Pressable>
@@ -293,6 +301,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e2e8f0',
   },
   title: { fontSize: 22, fontWeight: '700' },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logo: { width: 72, height: 24 },
   logout: { color: '#64748b', fontSize: 13 },
   card: {
     margin: 16,

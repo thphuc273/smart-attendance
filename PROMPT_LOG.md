@@ -878,4 +878,136 @@ apps/mobile: tsc clean; 5 screens (+2 mới: /checkin, /session/[id])
 - [ ] E2E test flow employee web check-in → override → CSV export — cần Testcontainers
 - [ ] Thêm seed data work-schedules để demo `/schedules` không rỗng sau reset-db
 
+---
+
+## Session #010 — 2026-04-17 — UX polish, bug hunt, React Query adoption, brand
+
+### Prompt gốc (chuỗi)
+
+> "thiết kế lại UI của portal để dễ nhìn hơn với màu sắc tươi tắn trẻ trung hơn"
+> "hiện tại tạo employee tại cùng 1 nơi, tạo ca làm tại cùng thời điểm nhưng khi check in lại báo ❌ INVALID_LOCATION"
+> "thêm chức năng thêm/xóa/edit employee cho manager và admin chưa"
+> "Check in rồi nhưng không thấy ghi nhận thời gian checkin"
+> "khi chưa checkin thì sẽ mở button checkin và khóa button checkout … trust score chỉ hiện ở portal cho admin hoặc manager thấy thôi"
+> "các thẻ Ngày Trạng thái In Out Late/OT, cần chuyển sang đúng giờ, trễ..."
+> "áp dụng react query hook"
+> "cập nhật logo FinOS lên web portal và mobile"
+
+Session này là đợt polish + bug-hunt tiếp theo Sprint 4. Không có feature bắt buộc nào từ spec mới, chủ yếu UX + DX + fix các bug user chạm phải khi demo thật.
+
+### 1. Quyết định thiết kế
+
+| # | Câu hỏi | Quyết định | Rationale |
+|---|---|---|---|
+| 1 | Colour palette redesign | **Indigo/violet/pink gradient** primary + teal/emerald/rose accents | User yêu cầu "tươi tắn trẻ trung". Slate-900 cũ formal quá. Enterprise-friendly nhưng vẫn hiện đại |
+| 2 | Font | Inter qua `rsms.me/inter` CDN | Free, self-host sau khi dùng `next/font/google` nếu offline demo |
+| 3 | Design tokens | globals.css `@layer components` với 6 utility class (`btn-primary`, `btn-secondary`, `btn-ghost`, `input`, `card`, `badge`) | Không dùng shadcn (dep lớn) — tokens đủ đồng bộ cho 10 pages |
+| 4 | Branch geofence fallback | Treat `Branch.lat/lng/radius_meters` là **implicit default geofence**; `branch_geofences[]` là *bổ sung* | User tạo branch mới không cần thêm geofence row — UX đơn giản. Multi-entry buildings vẫn add qua `branch_geofences` |
+| 5 | Manager CRUD nhân viên | Cho phép Create/Update/Delete trong scope `managed_branch_ids` | Trước chỉ admin. Real-world manager cần tự thêm nhân viên mới, không thể bottleneck qua admin |
+| 6 | Role escalation | Reject `403 ROLE_ESCALATION_BLOCKED` nếu manager thử tạo role manager/admin | Security: manager chỉ CRUD employee — không được tự phong cấp |
+| 7 | Soft-delete employee | `employment_status=terminated` + `user.status=inactive` | Giữ lịch sử attendance, vô hiệu hoá login |
+| 8 | Date parsing strict | Regex `YYYY-MM-DD` + year range [2000,2100] | Một user input non-standard đã cho Prisma nuốt ISO extended-year `+042026-02-28` crash server |
+| 9 | Workdate timezone | Luôn tính theo `Asia/Ho_Chi_Minh` ở cả backend + frontend | Docker chạy UTC mặc định → setHours(0,0,0,0) → UTC midnight ≠ VN calendar day → "today filter" lệch 1 ngày |
+| 10 | Button state check-in/out | Check-in lock vĩnh viễn sau success; Check-out **mở lại** sau check-out (update latest wins) | User explicit requirement. Trước là ALREADY_CHECKED_OUT block |
+| 11 | Trust score visibility | Ẩn khỏi UI employee (`/checkin`), chỉ show ở `/sessions`, `/dashboard`, `/audit-logs` | Nhân viên thấy trust score → có thể tự optimize để bypass (vd đoán weights). Admin/manager cần số này để review anomaly |
+| 12 | Status labels | Tiếng Việt bảng (`Đúng giờ`, `Đi muộn`, etc.) hiển thị; enum raw vẫn đi qua API | User-friendly mà không đổi contract |
+| 13 | Server state management | **TanStack Query** toàn portal | Previously: `useState + useEffect + fetch` — không cache, refetch sai thời điểm, polling loops bị leak. React Query: built-in dedup, refetch-on-focus, mutation invalidation |
+| 14 | Query key strategy | Hierarchical factory (`['employees', id, 'devices']`) | Invalidate `['employees']` drops toàn bộ employee cache bao gồm subresources |
+| 15 | Export polling | `useQuery` với `refetchInterval` dynamic (stop khi `completed`/`failed`) | Thay thế `setTimeout` recursive loop. Tự cleanup khi unmount |
+| 16 | Mobile logo placement | `apps/mobile/assets/finos-logo.png` require()-loaded, inline với title | Keep brand nhất quán với portal |
+
+### 2. Bug hunt notable
+
+#### Bug A — Check-in cách geofence 6.7km khi dev đang ở đúng branch
+- **Root causes (2 layered):**
+  1. Portal `CreateModal` branch form có default lat/lng cứng = HCM-Q1 (10.7769, 106.7009). User không sửa → branch mới inherit Saigon coords → check-in thật xa vị trí → 6.5km distance
+  2. Attendance check-in code chỉ scan `branch_geofences[]`, ignore `Branch.lat/lng` level fields. Branch vừa tạo qua portal chưa có `branch_geofences` row → `closestDistance = Infinity` → distance `null`
+- **Fix:**
+  1. Remove hard-coded default, add **📍 Dùng vị trí hiện tại** button → `navigator.geolocation`
+  2. Treat Branch.lat/lng làm implicit default geofence trong `checkIn()` + `checkOut()`
+- **Bonus:** rich error details (`hint`, `scanned_branches[]`, `user_location`) + collapsible debug panel trên portal — lần sau user gặp mismatch sẽ tự thấy ngay
+
+#### Bug B — `Could not convert argument value +042026-02-28T17:00:00.000Z`
+- User nhập một date string non-standard vào form assign schedule. Prisma `@db.Date` nuốt Date object có year `42026` (ISO extended-year format) → PrismaClientUnknownRequestError 500
+- **Fix:** helper `parseDateOnly(str, field)` strict regex `^\d{4}-\d{2}-\d{2}$` + year range 2000-2100 + calendar-valid check. DTO thêm `@Matches(DATE_ONLY_REGEX)` như layer 1, service parseDateOnly làm layer 2
+- Shared util `common/utils/date-only.ts` với 8 unit tests
+
+#### Bug C — Check-in thành công nhưng UI hiển thị "—"
+- Timezone drift. Server Docker UTC → `setHours(0,0,0,0)` = UTC midnight. Client `new Date().toISOString().slice(0,10)` cũng UTC. Nhưng nếu server chạy Mac local VN (UTC+7), `setHours(0,0,0,0)` = VN midnight → Postgres DATE store = VN calendar day. Client so sánh UTC today → lệch 1 ngày
+- **Fix:** helper `todayInVN()` backend + `vnDateString()` frontend dùng `Intl.DateTimeFormat` với `timeZone: 'Asia/Ho_Chi_Minh'`. Business rule = workDate theo VN calendar, không phụ thuộc server TZ
+
+#### Bug D — Next.js `.next/` cache mismatch `Cannot find module './874.js'`
+- Chạy `pnpm build` giữa lúc `pnpm dev` đang chạy → `.next/` giữ chunks production nhưng dev server cần chunks dev
+- **Fix:** `rm -rf .next` mỗi lần commit UI lớn. Lesson: không build portal khi dev đang mở. Dùng `npx tsc --noEmit` để verify types thay vì build
+
+### 3. Commits trên PR #26 (feature/portal-redesign)
+
+| Commit | Scope | Files | Ghi chú |
+|---|---|---|---|
+| `5a6080c` | feat(portal): redesign UI vibrant palette | 13 | Core redesign |
+| `0748cf3` | fix: new branch GPS bug | 2 | Bug A |
+| `aa360df` | feat(employees): manager CRUD + scope | 5 | Quyết định 5–7 |
+| `c45ac63` | fix: rich INVALID_LOCATION details | 2 | Error UX |
+| `749ddc1` | feat(checkin): button state + hide trust | 2 | Quyết định 10, 11 |
+| `e6c26df` | fix: timezone-safe workDate | 2 | Bug C |
+| `00ef83d` | feat: live clock checkout + lock check-in | 2 | UX chi tiết |
+| `2250ce4` | feat: Vietnamese status labels | 2 | Quyết định 12 |
+| `08877f5` | feat: TanStack Query | 13 | Quyết định 13–15 |
+| `b9089d4` | feat(brand): FinOS logo | 6 | Logo |
+| `194112f` | fix(work-schedules, employees): strict date parsing | 6 | Bug B |
+
+Tổng PR #26: **~60 files, +2500 LOC**, không đụng test API nên 138/138 tests pass xuyên suốt.
+
+### 4. Sai lầm và fix (Session #010)
+
+**Sai lầm 15: Chạy `pnpm build` khi portal dev đang mở (lặp lại từ Session #008)**
+- Lần 2 hit bug `Cannot find module './874.js'` vì forget commit discipline.
+- **Bài học dài hạn:** thêm hook pre-push xoá `.next/` hoặc just đừng bao giờ `pnpm build` trên portal khi user đang chạy dev. Dùng `npx tsc --noEmit` đủ.
+
+**Sai lầm 16: sed -i '' replace quá greedy làm gãy var name `admin`**
+- `sed 's|isAdmin(user)|admin|g'` bị replace luôn dòng `const admin = isAdmin(user)` → `const admin = admin` (self-reference).
+- Fix: sửa tay 1 dòng. **Bài học:** sed replacement nên match boundary đầy đủ (vd `\bisAdmin(user)\b` với anchor) hoặc dùng Edit tool cho safer context-aware replace.
+
+**Sai lầm 17: "Sprint 4 done" syndrome lặp lại**
+- Sau PR #26 claim "done", user vẫn tìm ra 6 bugs (button state, trust leak, VN timezone, status labels, date parsing, GPS config). Test + typecheck không catch UX bugs.
+- **Bài học đặc thù session này:** Sau mỗi fix, làm smoke test 3 role actor (admin, manager, employee) trên happy path + 1 edge path. Claim done chỉ khi ≥2 path qua mỗi role.
+
+### 5. Docs cập nhật session này
+
+- `docs/spec.md` §5.2 — note trust score chỉ visible admin/manager
+- `docs/spec.md` §5.3 — note VN timezone cho workDate
+- `docs/spec.md` §5.4 — branch implicit default geofence + phân quyền manager CRUD + soft delete
+- `docs/spec.md` §5.5 — check-in immutable, check-out có thể update
+- `docs/api-spec.md` §1.3 — date format strict + year range
+- `docs/api-spec.md` §1.4 — ResponseTransformInterceptor contract (raw hoặc `{items, meta}`, KHÔNG tự wrap)
+- `docs/api-spec.md` §4 — employees roles mở rộng, DELETE endpoint + ROLE_ESCALATION_BLOCKED error
+- `docs/api-spec.md` §8 — work-schedules full endpoints + INVALID_SCHEDULE/INVALID_RANGE errors
+- `docs/CLAUDE.md` §4.6 — design tokens, TanStack Query, logo, i18n pattern
+
+### 6. Prompts đáng học
+
+- **Error with rich context beats retry**: khi user báo bug, trả về debug JSON (user_location, scanned_branches) trong response error → user tự diagnose được 80% case, không phải paste curl nhiều lần
+- **Business rule trong docs**: rule "workDate = VN calendar day" là business rule thiết yếu, không chỉ implementation detail. Cần ghi rõ trong spec để dev mới không setHours(0,0,0,0) mà tưởng là ngày trong local tz của họ
+- **Design system token layer**: cân nhắc `@layer components` với class rút gọn thay vì shadcn — cost thấp cho 5-day demo, đủ nhất quán
+
+### 7. Prompts phải sửa (của mình)
+
+- "Sprint done, sẵn sàng merge" rồi user tìm ra 6 bugs → mình đã over-claim. Lần sau chỉ claim "backend done" hoặc "UI scaffolded" nếu chưa smoke test các role
+
+### 8. Kết quả cuối session
+
+```
+apps/api:    138/138 tests pass · tsc clean · nest build OK
+apps/portal: tsc clean · next build OK (9 routes, first load ~124KB)
+apps/mobile: tsc clean
+```
+
+### 9. Follow-up cho Day 5 (carry-over)
+
+- [ ] Zero-tap backend + mobile background task + portal policy UI (sprint §5 - chính)
+- [ ] E2E test với Testcontainers (nợ từ Session #008)
+- [ ] Mobile Expo SDK upgrade 51 → 54 nếu test trên phone thật
+- [ ] `PaginatedResult<T>` interceptor doc-comment (still nợ từ #008 + React Query mitigation: queries.ts giờ xử lý shape rõ ràng, nên nợ này giảm độ cấp thiết)
+- [ ] Rebase + merge 5 PR feature/sprint4-ui → feature/employees-ui → feature/work-schedules → feature/audit-logs-polish → feature/mobile-checkin → feature/portal-redesign vào develop, theo thứ tự
+
 

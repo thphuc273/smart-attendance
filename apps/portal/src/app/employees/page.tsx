@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
-import { getApi, isAdmin } from '../../lib/api';
+import { getApi, isAdmin, isManager } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Branch {
   id: string;
@@ -27,52 +29,39 @@ interface ListResp {
 
 export default function EmployeesPage() {
   const user = useRequireAuth('manager');
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const qc = useQueryClient();
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ search: '', branch_id: '', status: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [detailOf, setDetailOf] = useState<Employee | null>(null);
   const [creating, setCreating] = useState(false);
 
   const admin = isAdmin(user);
+  const canEdit = isManager(user); // admin + manager both edit
 
-  useEffect(() => {
-    if (!user) return;
-    getApi()
-      .get('branches?limit=100')
-      .json<{ data: Branch[] }>()
-      .then((r) => setBranches(r.data))
-      .catch(() => void 0);
-  }, [user]);
-
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (filters.search) params.set('search', filters.search);
-        if (filters.branch_id) params.set('branch_id', filters.branch_id);
-        if (filters.status) params.set('status', filters.status);
-        const resp = await api.get(`employees?${params}`).json<ListResp>();
-        setEmployees(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, user],
+  const branchesQ = useApiQuery<{ data: Branch[] }>(
+    queryKeys.branches({ limit: 100 }),
+    'branches?limit=100',
+    !!user,
   );
+  const branches = branchesQ.data?.data ?? [];
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (filters.search) params.set('search', filters.search);
+  if (filters.branch_id) params.set('branch_id', filters.branch_id);
+  if (filters.status) params.set('status', filters.status);
+
+  const listQ = useApiQuery<ListResp>(
+    queryKeys.employees({ page, ...filters }),
+    `employees?${params}`,
+    !!user,
+  );
+  const employees = listQ.data?.data ?? [];
+  const meta = listQ.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = listQ.isLoading || listQ.isFetching;
+  const error = listQ.error?.message ?? null;
+
+  const load = (p: number) => setPage(p);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['employees'] });
 
   if (!user) return null;
 
@@ -82,16 +71,16 @@ export default function EmployeesPage() {
       <main className="mx-auto max-w-6xl p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Employees</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Employees</h1>
             <p className="mt-1 text-sm text-slate-600">
               Quản lý nhân viên, device trust, branch assignments.
-              {!admin && <span className="ml-1 text-amber-600">(manager: read-only trong scope)</span>}
+              {!admin && <span className="ml-1 text-amber-600">(manager: chỉ thao tác trên nhân viên thuộc branch bạn quản lý)</span>}
             </p>
           </div>
-          {admin && (
+          {canEdit && (
             <button
               onClick={() => setCreating(true)}
-              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+              className="btn-primary"
             >
               + New employee
             </button>
@@ -102,13 +91,13 @@ export default function EmployeesPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            setPage(1);
           }}
         >
           <label className="text-sm">
             <span className="text-slate-600">Search (name/code/email)</span>
             <input
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.search}
               onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
               placeholder="EMP001"
@@ -117,7 +106,7 @@ export default function EmployeesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Branch</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.branch_id}
               onChange={(e) => setFilters((f) => ({ ...f, branch_id: e.target.value }))}
             >
@@ -130,7 +119,7 @@ export default function EmployeesPage() {
           <label className="text-sm">
             <span className="text-slate-600">Status</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.status}
               onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
             >
@@ -140,16 +129,16 @@ export default function EmployeesPage() {
               <option value="terminated">terminated</option>
             </select>
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-4 overflow-x-auto rounded-2xl bg-white shadow-card">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-3 py-2">Code</th>
                 <th className="px-3 py-2">Name</th>
@@ -180,7 +169,7 @@ export default function EmployeesPage() {
                   <td className="px-3 py-2">
                     <button
                       onClick={() => setDetailOf(e)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                     >
                       Detail
                     </button>
@@ -198,19 +187,21 @@ export default function EmployeesPage() {
         <DetailDrawer
           employee={detailOf}
           branches={branches}
-          canEdit={admin}
+          canEdit={canEdit}
+          isAdmin={admin}
           onClose={() => setDetailOf(null)}
-          onMutate={() => load(meta.page)}
+          onMutate={refresh}
         />
       )}
 
       {creating && (
         <CreateModal
           branches={branches}
+          isAdmin={admin}
           onClose={() => setCreating(false)}
           onSuccess={() => {
             setCreating(false);
-            load(1);
+            setPage(1);
           }}
         />
       )}
@@ -225,7 +216,7 @@ function StatusBadge({ status }: { status: string }) {
       : status === 'on_leave'
         ? 'bg-amber-100 text-amber-700'
         : 'bg-red-100 text-red-700';
-  return <span className={`rounded px-2 py-0.5 text-xs ${tone}`}>{status}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{status}</span>;
 }
 
 function Pagination({ meta, onChange }: { meta: ListResp['meta']; onChange: (p: number) => void }) {
@@ -262,12 +253,14 @@ function DetailDrawer({
   employee,
   branches,
   canEdit,
+  isAdmin,
   onClose,
   onMutate,
 }: {
   employee: Employee;
   branches: Branch[];
   canEdit: boolean;
+  isAdmin: boolean;
   onClose: () => void;
   onMutate: () => void;
 }) {
@@ -275,6 +268,26 @@ function DetailDrawer({
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingAssignment, setAddingAssignment] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteEmployee = async () => {
+    if (
+      !confirm(
+        `Terminate ${employee.user.full_name} (${employee.employee_code})? Account sẽ bị disable login, lịch sử chấm công vẫn giữ.`,
+      )
+    )
+      return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await getApi().delete(`employees/${employee.id}`);
+      onMutate();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+      setDeleting(false);
+    }
+  };
 
   const loadDevices = useCallback(async () => {
     try {
@@ -373,7 +386,7 @@ function DetailDrawer({
                   </div>
                   <button
                     onClick={() => toggleTrust(d)}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
                   >
                     {d.isTrusted ? 'Revoke' : 'Trust'}
                   </button>
@@ -413,6 +426,21 @@ function DetailDrawer({
             </span>
           </p>
         </section>
+
+        {canEdit && employee.employment_status !== 'terminated' && (
+          <div className="mt-8 border-t border-slate-100 pt-4">
+            <button
+              onClick={deleteEmployee}
+              disabled={deleting}
+              className="text-xs font-medium text-rose-600 hover:underline disabled:opacity-50"
+            >
+              {deleting ? 'Đang xoá…' : '🗑 Terminate employee'}
+            </button>
+            <p className="mt-1 text-[10px] text-slate-400">
+              Soft-delete: status → terminated, user login disabled. Lịch sử chấm công giữ nguyên.
+            </p>
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -469,7 +497,7 @@ function EditForm({
       <label className="block">
         <span className="text-slate-600">Full name</span>
         <input
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.full_name}
           onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
         />
@@ -477,7 +505,7 @@ function EditForm({
       <label className="block">
         <span className="text-slate-600">Primary branch</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.primary_branch_id}
           onChange={(e) => setForm((f) => ({ ...f, primary_branch_id: e.target.value }))}
         >
@@ -489,7 +517,7 @@ function EditForm({
       <label className="block">
         <span className="text-slate-600">Status</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.employment_status}
           onChange={(e) => setForm((f) => ({ ...f, employment_status: e.target.value as Employee['employment_status'] }))}
         >
@@ -502,7 +530,7 @@ function EditForm({
       <button
         type="submit"
         disabled={submitting}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className="btn-primary"
       >
         {submitting ? 'Saving…' : 'Save'}
       </button>
@@ -554,7 +582,7 @@ function AssignmentForm({
       <label className="block">
         <span className="text-slate-600">Branch</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.branch_id}
           onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value }))}
         >
@@ -566,7 +594,7 @@ function AssignmentForm({
       <label className="block">
         <span className="text-slate-600">Type</span>
         <select
-          className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           value={form.assignment_type}
           onChange={(e) => setForm((f) => ({ ...f, assignment_type: e.target.value as 'secondary' }))}
         >
@@ -579,7 +607,7 @@ function AssignmentForm({
           <span className="text-slate-600">From</span>
           <input
             type="date"
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.effective_from}
             onChange={(e) => setForm((f) => ({ ...f, effective_from: e.target.value }))}
           />
@@ -588,7 +616,7 @@ function AssignmentForm({
           <span className="text-slate-600">To (optional)</span>
           <input
             type="date"
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.effective_to}
             onChange={(e) => setForm((f) => ({ ...f, effective_to: e.target.value }))}
           />
@@ -608,10 +636,12 @@ function AssignmentForm({
 
 function CreateModal({
   branches,
+  isAdmin,
   onClose,
   onSuccess,
 }: {
   branches: Branch[];
+  isAdmin: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -655,7 +685,7 @@ function CreateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Tạo nhân viên mới</h2>
@@ -665,7 +695,7 @@ function CreateModal({
             <span className="text-slate-600">Employee code</span>
             <input
               required
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="EMP031"
               value={form.employee_code}
               onChange={(e) => setForm((f) => ({ ...f, employee_code: e.target.value }))}
@@ -674,13 +704,14 @@ function CreateModal({
           <label className="block flex-1 text-sm">
             <span className="text-slate-600">Role</span>
             <select
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={form.role}
               onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as 'employee' }))}
+              disabled={!isAdmin}
             >
               <option value="employee">employee</option>
-              <option value="manager">manager</option>
-              <option value="admin">admin</option>
+              {isAdmin && <option value="manager">manager</option>}
+              {isAdmin && <option value="admin">admin</option>}
             </select>
           </label>
         </div>
@@ -689,7 +720,7 @@ function CreateModal({
           <span className="text-slate-600">Full name</span>
           <input
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.full_name}
             onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
           />
@@ -700,7 +731,7 @@ function CreateModal({
           <input
             type="email"
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.email}
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
           />
@@ -712,7 +743,7 @@ function CreateModal({
             type="text"
             required
             minLength={6}
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.password}
             onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
           />
@@ -721,7 +752,7 @@ function CreateModal({
         <label className="block text-sm">
           <span className="text-slate-600">Phone</span>
           <input
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.phone}
             onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
           />
@@ -731,7 +762,7 @@ function CreateModal({
           <span className="text-slate-600">Primary branch</span>
           <select
             required
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             value={form.primary_branch_id}
             onChange={(e) => setForm((f) => ({ ...f, primary_branch_id: e.target.value }))}
           >
@@ -750,7 +781,7 @@ function CreateModal({
           <button
             type="submit"
             disabled={submitting}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            className="btn-primary"
           >
             {submitting ? 'Creating…' : 'Create'}
           </button>

@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
-import { getApi } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
 
 type AuditAction = 'create' | 'update' | 'delete' | 'override' | 'login' | 'logout';
 
@@ -29,40 +29,27 @@ const ACTIONS: AuditAction[] = ['create', 'update', 'delete', 'override', 'login
 
 export default function AuditLogsPage() {
   const user = useRequireAuth('admin');
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ action: '', entity_type: '', date_from: '', date_to: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (filters.action) params.set('action', filters.action);
-        if (filters.entity_type) params.set('entity_type', filters.entity_type);
-        if (filters.date_from) params.set('date_from', filters.date_from);
-        if (filters.date_to) params.set('date_to', filters.date_to);
-        const resp = await api.get(`audit-logs?${params}`).json<ListResp>();
-        setLogs(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, user],
-  );
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (filters.action) params.set('action', filters.action);
+  if (filters.entity_type) params.set('entity_type', filters.entity_type);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const query = useApiQuery<ListResp>(
+    queryKeys.auditLogs({ page, ...filters }),
+    `audit-logs?${params}`,
+    !!user,
+  );
+  const logs = query.data?.data ?? [];
+  const meta = query.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = query.isLoading || query.isFetching;
+  const error = query.error?.message ?? null;
+
+  const load = (p: number) => setPage(p);
 
   if (!user) return null;
 
@@ -70,7 +57,7 @@ export default function AuditLogsPage() {
     <>
       <TopNav />
       <main className="mx-auto max-w-6xl p-6">
-        <h1 className="text-2xl font-bold">Audit logs</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Audit logs</h1>
         <p className="mt-1 text-sm text-slate-600">
           Compliance trail — mọi thay đổi override session, login/logout, create/delete entity.
         </p>
@@ -79,13 +66,13 @@ export default function AuditLogsPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            setPage(1);
           }}
         >
           <label className="text-sm">
             <span className="text-slate-600">Action</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.action}
               onChange={(e) => setFilters((f) => ({ ...f, action: e.target.value }))}
             >
@@ -98,7 +85,7 @@ export default function AuditLogsPage() {
           <label className="text-sm">
             <span className="text-slate-600">Entity type</span>
             <input
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               placeholder="AttendanceSession"
               value={filters.entity_type}
               onChange={(e) => setFilters((f) => ({ ...f, entity_type: e.target.value }))}
@@ -108,7 +95,7 @@ export default function AuditLogsPage() {
             <span className="text-slate-600">From</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_from}
               onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value }))}
             />
@@ -117,21 +104,21 @@ export default function AuditLogsPage() {
             <span className="text-slate-600">To</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_to}
               onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value }))}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-4 overflow-x-auto rounded-2xl bg-white shadow-card">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-3 py-2">Time</th>
                 <th className="px-3 py-2">Action</th>
@@ -232,5 +219,5 @@ function ActionBadge({ action }: { action: AuditAction }) {
     login: 'bg-slate-100 text-slate-700',
     logout: 'bg-slate-100 text-slate-500',
   };
-  return <span className={`rounded px-2 py-0.5 text-xs ${tone[action]}`}>{action}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone[action]}`}>{action}</span>;
 }

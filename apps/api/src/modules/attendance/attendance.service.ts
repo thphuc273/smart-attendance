@@ -26,6 +26,17 @@ import { ScheduleService } from './schedule.service';
 const IMPOSSIBLE_TRAVEL_KMH = 120;
 const IMPOSSIBLE_TRAVEL_LOOKBACK_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Work-date = calendar day in VN (UTC+7), encoded as UTC-midnight Date.
+ * Stored into Postgres @db.Date (strips time). Keeps DB day consistent
+ * regardless of server TZ (Docker UTC, Mac local, etc).
+ */
+function todayInVN(): Date {
+  const nowMs = Date.now() + 7 * 3600 * 1000;
+  const vn = new Date(nowMs);
+  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate()));
+}
+
 @Injectable()
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
@@ -109,13 +120,22 @@ export class AttendanceService {
     const point = { latitude: dto.latitude, longitude: dto.longitude };
 
     for (const branch of branches) {
-      // Check geofences
-      for (const geo of branch.geofences) {
-        const geofence: Geofence = {
-          centerLat: Number(geo.centerLat),
-          centerLng: Number(geo.centerLng),
-          radiusMeters: geo.radiusMeters,
-        };
+      // Branch.lat/lng/radiusMeters acts as the default/implicit geofence.
+      // BranchGeofence rows are ADDITIONAL (e.g. multi-entrance buildings).
+      const branchGeofences: Geofence[] = [
+        {
+          centerLat: Number(branch.latitude),
+          centerLng: Number(branch.longitude),
+          radiusMeters: branch.radiusMeters,
+        },
+        ...branch.geofences.map((g) => ({
+          centerLat: Number(g.centerLat),
+          centerLng: Number(g.centerLng),
+          radiusMeters: g.radiusMeters,
+        })),
+      ];
+
+      for (const geofence of branchGeofences) {
         if (isInsideGeofence(point, geofence)) {
           gpsValid = true;
           matchedBranch = branch;
@@ -127,6 +147,8 @@ export class AttendanceService {
           if (!matchedBranch) matchedBranch = branch;
         }
       }
+
+      if (gpsValid) continue; // already matched this branch by GPS
 
       // Check WiFi
       const wifiConfigs: WifiConfig[] = branch.wifiConfigs.map((w) => ({
@@ -180,10 +202,8 @@ export class AttendanceService {
     // 7. Validation: reject if both GPS and WiFi fail
     const validationPassed = gpsValid || bssidMatch || ssidOnlyMatch;
 
-    // 8. Check for existing session today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const workDate = today;
+    // 8. Check for existing session today (VN calendar day)
+    const workDate = todayInVN();
 
     const existingSession = await this.prisma.attendanceSession.findUnique({
       where: {
@@ -192,10 +212,15 @@ export class AttendanceService {
       include: { events: { where: { eventType: 'check_in', status: 'success' } } },
     });
 
-    if (existingSession && existingSession.events.length > 0) {
+    // Check-in cannot be updated. Either a success event OR a persisted
+    // checkInAt means today is locked for check-in.
+    if (
+      existingSession &&
+      (existingSession.checkInAt !== null || existingSession.events.length > 0)
+    ) {
       throw new ConflictException({
         code: 'ALREADY_CHECKED_IN',
-        message: 'Already checked in today',
+        message: 'Already checked in today — check-in time cannot be updated',
       });
     }
 
@@ -275,6 +300,26 @@ export class AttendanceService {
 
     // 11. If validation failed, throw (but event is already logged)
     if (!validationPassed) {
+      const distanceValue = Number.isFinite(closestDistance) ? Math.round(closestDistance) : null;
+      const scannedBranches = branches.map((b) => ({
+        id: b.id,
+        code: b.code,
+        name: b.name,
+        latitude: Number(b.latitude),
+        longitude: Number(b.longitude),
+        radius_meters: b.radiusMeters,
+      }));
+      let hint: string;
+      if (branches.length === 0) {
+        hint =
+          'Không tìm thấy branch active cho nhân viên này. Kiểm tra primary_branch và branch.status.';
+      } else if (distanceValue === null) {
+        hint = 'Không tính được khoảng cách — branch thiếu toạ độ hợp lệ.';
+      } else if (distanceValue > 2000) {
+        hint = `GPS của bạn cách branch gần nhất ${distanceValue}m. Branch có thể đã lưu sai toạ độ. Yêu cầu admin kiểm tra lat/lng của ${scannedBranches[0]?.name}.`;
+      } else {
+        hint = `Bạn đang cách branch ${distanceValue}m (radius ${scannedBranches[0]?.radius_meters}m). Di chuyển gần hơn hoặc tăng radius.`;
+      }
       throw new UnprocessableEntityException({
         code: 'INVALID_LOCATION',
         message: 'Vị trí ngoài geofence và WiFi không khớp',
@@ -282,7 +327,10 @@ export class AttendanceService {
           event_id: result.event.id,
           trust_score: trustResult.score,
           risk_flags: trustResult.flags,
-          distance_meters: Math.round(closestDistance),
+          distance_meters: distanceValue,
+          user_location: { latitude: dto.latitude, longitude: dto.longitude },
+          scanned_branches: scannedBranches,
+          hint,
         },
       });
     }
@@ -314,13 +362,12 @@ export class AttendanceService {
       });
     }
 
-    // 2. Find today's session
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // 2. Find today's session (VN calendar day)
+    const workDate = todayInVN();
 
     const session = await this.prisma.attendanceSession.findUnique({
       where: {
-        employeeId_workDate: { employeeId: employee.id, workDate: today },
+        employeeId_workDate: { employeeId: employee.id, workDate },
       },
     });
 
@@ -331,12 +378,8 @@ export class AttendanceService {
       });
     }
 
-    if (session.checkOutAt) {
-      throw new ConflictException({
-        code: 'ALREADY_CHECKED_OUT',
-        message: 'Already checked out today',
-      });
-    }
+    // Re-check-out allowed: updates the existing checkOutAt timestamp.
+    // Every attempt is still logged in attendance_events for audit trail.
 
     // 3. Load branch configs for validation
     const branch = await this.prisma.branch.findUnique({
@@ -354,12 +397,20 @@ export class AttendanceService {
     const point = { latitude: dto.latitude, longitude: dto.longitude };
 
     if (branch) {
-      for (const geo of branch.geofences) {
-        const geofence: Geofence = {
-          centerLat: Number(geo.centerLat),
-          centerLng: Number(geo.centerLng),
-          radiusMeters: geo.radiusMeters,
-        };
+      // Branch.lat/lng acts as default geofence + any BranchGeofence rows as additional.
+      const branchGeofences: Geofence[] = [
+        {
+          centerLat: Number(branch.latitude),
+          centerLng: Number(branch.longitude),
+          radiusMeters: branch.radiusMeters,
+        },
+        ...branch.geofences.map((g) => ({
+          centerLat: Number(g.centerLat),
+          centerLng: Number(g.centerLng),
+          radiusMeters: g.radiusMeters,
+        })),
+      ];
+      for (const geofence of branchGeofences) {
         if (isInsideGeofence(point, geofence)) {
           gpsValid = true;
           break;

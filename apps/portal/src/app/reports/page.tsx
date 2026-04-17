@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQuery } from '@tanstack/react-query';
 
 interface Branch {
   id: string;
@@ -34,10 +36,6 @@ interface ExportStatus {
 
 export default function ReportsPage() {
   const user = useRequireAuth('manager');
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [summary, setSummary] = useState<DailySummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const [filters, setFilters] = useState({
@@ -46,41 +44,28 @@ export default function ReportsPage() {
     date_to: today,
   });
 
-  // Load branches once
-  useEffect(() => {
-    if (!user) return;
-    const api = getApi();
-    api
-      .get('branches?limit=100')
-      .json<{ data: Branch[] }>()
-      .then((r) => setBranches(r.data))
-      .catch(() => void 0);
-  }, [user]);
+  const branchesQ = useApiQuery<{ data: Branch[] }>(
+    queryKeys.branches({ limit: 100 }),
+    'branches?limit=100',
+    !!user,
+  );
+  const branches = branchesQ.data?.data ?? [];
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const api = getApi();
-      const params = new URLSearchParams();
-      if (filters.branch_id) params.set('branch_id', filters.branch_id);
-      if (filters.date_from) params.set('date_from', filters.date_from);
-      if (filters.date_to) params.set('date_to', filters.date_to);
-      const resp = await api
-        .get(`reports/daily-summary?${params}`)
-        .json<{ data: DailySummary[] }>();
-      setSummary(resp.data);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [filters, user]);
+  const params = new URLSearchParams();
+  if (filters.branch_id) params.set('branch_id', filters.branch_id);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
 
-  useEffect(() => {
-    if (user) load();
-  }, [user, load]);
+  const summaryQ = useApiQuery<{ data: DailySummary[] }>(
+    queryKeys.reports(filters),
+    `reports/daily-summary?${params}`,
+    !!user,
+  );
+  const summary = summaryQ.data?.data ?? [];
+  const loading = summaryQ.isLoading || summaryQ.isFetching;
+  const error = summaryQ.error?.message ?? null;
+
+  const load = () => summaryQ.refetch();
 
   if (!user) return null;
 
@@ -90,7 +75,7 @@ export default function ReportsPage() {
     <>
       <TopNav />
       <main className="mx-auto max-w-6xl p-6">
-        <h1 className="text-2xl font-bold">Reports</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Reports</h1>
         <p className="mt-1 text-sm text-slate-600">Daily summary theo branch + CSV export.</p>
 
         <form
@@ -103,7 +88,7 @@ export default function ReportsPage() {
           <label className="text-sm">
             <span className="text-slate-600">Branch</span>
             <select
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.branch_id}
               onChange={(e) => setFilters((f) => ({ ...f, branch_id: e.target.value }))}
             >
@@ -119,7 +104,7 @@ export default function ReportsPage() {
             <span className="text-slate-600">From</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_from}
               onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value }))}
             />
@@ -128,23 +113,23 @@ export default function ReportsPage() {
             <span className="text-slate-600">To</span>
             <input
               type="date"
-              className="mt-1 block rounded border border-slate-300 px-2 py-1"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               value={filters.date_to}
               onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value }))}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="btn-primary">
             Apply
           </button>
         </form>
 
-        {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
 
         <section className="mt-6">
           <h2 className="text-lg font-semibold">Daily summary</h2>
-          <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <div className="mt-2 overflow-x-auto rounded-2xl bg-white shadow-card">
             <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <thead className="border-b border-slate-100 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Branch</th>
@@ -202,23 +187,34 @@ export default function ReportsPage() {
 
 function ExportPanel({ filters }: { filters: { branch_id: string; date_from: string; date_to: string } }) {
   const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<ExportStatus['data'] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const canExport = filters.branch_id && filters.date_from && filters.date_to;
 
+  // React Query polls status every 1.2s until job is settled
+  const statusQ = useQuery<ExportStatus>({
+    queryKey: jobId ? queryKeys.export(jobId) : ['reports', 'export', 'none'],
+    queryFn: async () => getApi().get(`reports/export/${jobId}`).json<ExportStatus>(),
+    enabled: !!jobId,
+    refetchInterval: (q) => {
+      const s = q.state.data?.data.status;
+      return s === 'completed' || s === 'failed' ? false : 1200;
+    },
+  });
+  const status = statusQ.data?.data ?? null;
+  const error = submitError ?? statusQ.error?.message ?? null;
+
   const submit = async () => {
     if (!canExport) {
-      setError('Cần chọn branch + date range');
+      setSubmitError('Cần chọn branch + date range');
       return;
     }
-    setError(null);
+    setSubmitError(null);
     setSubmitting(true);
-    setStatus(null);
+    setJobId(null);
     try {
-      const api = getApi();
-      const resp = await api
+      const resp = await getApi()
         .post('reports/export', {
           json: {
             type: 'attendance_csv',
@@ -230,34 +226,11 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
         .json<{ data: { job_id: string; status: string } }>();
       setJobId(resp.data.job_id);
     } catch (e) {
-      setError((e as Error).message);
+      setSubmitError((e as Error).message);
     } finally {
       setSubmitting(false);
     }
   };
-
-  // Poll status
-  useEffect(() => {
-    if (!jobId) return;
-    const api = getApi();
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const r = await api.get(`reports/export/${jobId}`).json<ExportStatus>();
-        if (stopped) return;
-        setStatus(r.data);
-        if (r.data.status !== 'completed' && r.data.status !== 'failed') {
-          setTimeout(tick, 1200);
-        }
-      } catch (e) {
-        if (!stopped) setError((e as Error).message);
-      }
-    };
-    tick();
-    return () => {
-      stopped = true;
-    };
-  }, [jobId]);
 
   const download = async () => {
     if (!jobId) return;
@@ -272,7 +245,7 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError((e as Error).message);
+      setSubmitError((e as Error).message);
     }
   };
 
@@ -281,7 +254,7 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
       <button
         onClick={submit}
         disabled={!canExport || submitting}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+        className="btn-primary"
       >
         {submitting ? 'Enqueuing…' : 'Enqueue export'}
       </button>
@@ -313,7 +286,7 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
           {status.status === 'completed' && (
             <button
               onClick={download}
-              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand-700"
             >
               ⬇ Download CSV
             </button>
