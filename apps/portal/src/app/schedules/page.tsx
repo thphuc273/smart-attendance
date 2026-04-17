@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi, isAdmin } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Schedule {
   id: string;
@@ -26,31 +28,18 @@ const WEEKDAY_NAMES = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
 export default function SchedulesPage() {
   const user = useRequireAuth('manager');
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [assignTo, setAssignTo] = useState<Schedule | null>(null);
 
   const admin = isAdmin(user);
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await getApi().get('work-schedules').json<{ data: Schedule[] }>();
-      setSchedules(r.data);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
+  const listQ = useApiQuery<{ data: Schedule[] }>(queryKeys.schedules(), 'work-schedules', !!user);
+  const schedules = listQ.data?.data ?? [];
+  const loading = listQ.isLoading || listQ.isFetching;
+  const error = listQ.error?.message ?? null;
 
-  useEffect(() => {
-    if (user) load();
-  }, [user, load]);
+  const load = () => qc.invalidateQueries({ queryKey: ['work-schedules'] });
 
   if (!user) return null;
 

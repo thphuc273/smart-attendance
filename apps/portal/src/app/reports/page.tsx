@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQuery } from '@tanstack/react-query';
 
 interface Branch {
   id: string;
@@ -34,10 +36,6 @@ interface ExportStatus {
 
 export default function ReportsPage() {
   const user = useRequireAuth('manager');
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [summary, setSummary] = useState<DailySummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const [filters, setFilters] = useState({
@@ -46,41 +44,28 @@ export default function ReportsPage() {
     date_to: today,
   });
 
-  // Load branches once
-  useEffect(() => {
-    if (!user) return;
-    const api = getApi();
-    api
-      .get('branches?limit=100')
-      .json<{ data: Branch[] }>()
-      .then((r) => setBranches(r.data))
-      .catch(() => void 0);
-  }, [user]);
+  const branchesQ = useApiQuery<{ data: Branch[] }>(
+    queryKeys.branches({ limit: 100 }),
+    'branches?limit=100',
+    !!user,
+  );
+  const branches = branchesQ.data?.data ?? [];
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const api = getApi();
-      const params = new URLSearchParams();
-      if (filters.branch_id) params.set('branch_id', filters.branch_id);
-      if (filters.date_from) params.set('date_from', filters.date_from);
-      if (filters.date_to) params.set('date_to', filters.date_to);
-      const resp = await api
-        .get(`reports/daily-summary?${params}`)
-        .json<{ data: DailySummary[] }>();
-      setSummary(resp.data);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [filters, user]);
+  const params = new URLSearchParams();
+  if (filters.branch_id) params.set('branch_id', filters.branch_id);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
 
-  useEffect(() => {
-    if (user) load();
-  }, [user, load]);
+  const summaryQ = useApiQuery<{ data: DailySummary[] }>(
+    queryKeys.reports(filters),
+    `reports/daily-summary?${params}`,
+    !!user,
+  );
+  const summary = summaryQ.data?.data ?? [];
+  const loading = summaryQ.isLoading || summaryQ.isFetching;
+  const error = summaryQ.error?.message ?? null;
+
+  const load = () => summaryQ.refetch();
 
   if (!user) return null;
 
@@ -202,23 +187,34 @@ export default function ReportsPage() {
 
 function ExportPanel({ filters }: { filters: { branch_id: string; date_from: string; date_to: string } }) {
   const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<ExportStatus['data'] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const canExport = filters.branch_id && filters.date_from && filters.date_to;
 
+  // React Query polls status every 1.2s until job is settled
+  const statusQ = useQuery<ExportStatus>({
+    queryKey: jobId ? queryKeys.export(jobId) : ['reports', 'export', 'none'],
+    queryFn: async () => getApi().get(`reports/export/${jobId}`).json<ExportStatus>(),
+    enabled: !!jobId,
+    refetchInterval: (q) => {
+      const s = q.state.data?.data.status;
+      return s === 'completed' || s === 'failed' ? false : 1200;
+    },
+  });
+  const status = statusQ.data?.data ?? null;
+  const error = submitError ?? statusQ.error?.message ?? null;
+
   const submit = async () => {
     if (!canExport) {
-      setError('Cần chọn branch + date range');
+      setSubmitError('Cần chọn branch + date range');
       return;
     }
-    setError(null);
+    setSubmitError(null);
     setSubmitting(true);
-    setStatus(null);
+    setJobId(null);
     try {
-      const api = getApi();
-      const resp = await api
+      const resp = await getApi()
         .post('reports/export', {
           json: {
             type: 'attendance_csv',
@@ -230,34 +226,11 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
         .json<{ data: { job_id: string; status: string } }>();
       setJobId(resp.data.job_id);
     } catch (e) {
-      setError((e as Error).message);
+      setSubmitError((e as Error).message);
     } finally {
       setSubmitting(false);
     }
   };
-
-  // Poll status
-  useEffect(() => {
-    if (!jobId) return;
-    const api = getApi();
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const r = await api.get(`reports/export/${jobId}`).json<ExportStatus>();
-        if (stopped) return;
-        setStatus(r.data);
-        if (r.data.status !== 'completed' && r.data.status !== 'failed') {
-          setTimeout(tick, 1200);
-        }
-      } catch (e) {
-        if (!stopped) setError((e as Error).message);
-      }
-    };
-    tick();
-    return () => {
-      stopped = true;
-    };
-  }, [jobId]);
 
   const download = async () => {
     if (!jobId) return;
@@ -272,7 +245,7 @@ function ExportPanel({ filters }: { filters: { branch_id: string; date_from: str
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError((e as Error).message);
+      setSubmitError((e as Error).message);
     }
   };
 

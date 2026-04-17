@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi, isAdmin, isManager } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Branch {
   id: string;
@@ -27,53 +29,39 @@ interface ListResp {
 
 export default function EmployeesPage() {
   const user = useRequireAuth('manager');
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const qc = useQueryClient();
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ search: '', branch_id: '', status: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [detailOf, setDetailOf] = useState<Employee | null>(null);
   const [creating, setCreating] = useState(false);
 
   const admin = isAdmin(user);
   const canEdit = isManager(user); // admin + manager both edit
 
-  useEffect(() => {
-    if (!user) return;
-    getApi()
-      .get('branches?limit=100')
-      .json<{ data: Branch[] }>()
-      .then((r) => setBranches(r.data))
-      .catch(() => void 0);
-  }, [user]);
-
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (filters.search) params.set('search', filters.search);
-        if (filters.branch_id) params.set('branch_id', filters.branch_id);
-        if (filters.status) params.set('status', filters.status);
-        const resp = await api.get(`employees?${params}`).json<ListResp>();
-        setEmployees(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, user],
+  const branchesQ = useApiQuery<{ data: Branch[] }>(
+    queryKeys.branches({ limit: 100 }),
+    'branches?limit=100',
+    !!user,
   );
+  const branches = branchesQ.data?.data ?? [];
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (filters.search) params.set('search', filters.search);
+  if (filters.branch_id) params.set('branch_id', filters.branch_id);
+  if (filters.status) params.set('status', filters.status);
+
+  const listQ = useApiQuery<ListResp>(
+    queryKeys.employees({ page, ...filters }),
+    `employees?${params}`,
+    !!user,
+  );
+  const employees = listQ.data?.data ?? [];
+  const meta = listQ.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = listQ.isLoading || listQ.isFetching;
+  const error = listQ.error?.message ?? null;
+
+  const load = (p: number) => setPage(p);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['employees'] });
 
   if (!user) return null;
 
@@ -103,7 +91,7 @@ export default function EmployeesPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            setPage(1);
           }}
         >
           <label className="text-sm">
@@ -202,7 +190,7 @@ export default function EmployeesPage() {
           canEdit={canEdit}
           isAdmin={admin}
           onClose={() => setDetailOf(null)}
-          onMutate={() => load(meta.page)}
+          onMutate={refresh}
         />
       )}
 
@@ -213,7 +201,7 @@ export default function EmployeesPage() {
           onClose={() => setCreating(false)}
           onSuccess={() => {
             setCreating(false);
-            load(1);
+            setPage(1);
           }}
         />
       )}

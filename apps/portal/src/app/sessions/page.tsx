@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi } from '../../lib/api';
+import { useApiQuery, useApiMutation, queryKeys } from '../../lib/queries';
 
 interface Session {
   id: string;
@@ -28,44 +29,29 @@ const STATUSES = ['on_time', 'late', 'early_leave', 'overtime', 'missing_checkou
 
 export default function SessionsPage() {
   const user = useRequireAuth('manager');
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({
-    total: 0,
-    page: 1,
-    limit: 20,
-    total_pages: 1,
-  });
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ status: '', date_from: '', date_to: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [overrideOf, setOverrideOf] = useState<Session | null>(null);
 
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (filters.status) params.set('status', filters.status);
-        if (filters.date_from) params.set('date_from', filters.date_from);
-        if (filters.date_to) params.set('date_to', filters.date_to);
-        const resp = await api.get(`attendance/sessions?${params}`).json<ListResp>();
-        setSessions(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, user],
-  );
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (filters.status) params.set('status', filters.status);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const query = useApiQuery<ListResp>(
+    queryKeys.sessions({ page, ...filters }),
+    `attendance/sessions?${params}`,
+    !!user,
+  );
+  const sessions = query.data?.data ?? [];
+  const meta = query.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = query.isLoading || query.isFetching;
+  const error = query.error?.message ?? null;
+
+  const applyFilters = () => {
+    setPage(1);
+  };
+  const load = (p: number) => setPage(p);
 
   if (!user) return null;
 
@@ -82,7 +68,7 @@ export default function SessionsPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            applyFilters();
           }}
         >
           <label className="text-sm">
@@ -204,10 +190,7 @@ export default function SessionsPage() {
         <OverrideModal
           session={overrideOf}
           onClose={() => setOverrideOf(null)}
-          onSuccess={() => {
-            setOverrideOf(null);
-            load(meta.page);
-          }}
+          onSuccess={() => setOverrideOf(null)}
         />
       )}
     </>
@@ -286,25 +269,23 @@ function OverrideModal({
 }) {
   const [status, setStatus] = useState(session.status);
   const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
 
-  const submit = async () => {
+  const mutation = useApiMutation(
+    async (payload: { status: string; note: string }) =>
+      getApi().patch(`attendance/sessions/${session.id}`, { json: payload }).json<unknown>(),
+    [queryKeys.sessions(), queryKeys.auditLogs(), queryKeys.anomalies()],
+  );
+  const submitting = mutation.isPending;
+  const error = clientError ?? mutation.error?.message ?? null;
+
+  const submit = () => {
     if (note.trim().length < 3) {
-      setError('Note tối thiểu 3 ký tự');
+      setClientError('Note tối thiểu 3 ký tự');
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const api = getApi();
-      await api.patch(`attendance/sessions/${session.id}`, { json: { status, note } });
-      onSuccess();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    setClientError(null);
+    mutation.mutate({ status, note }, { onSuccess });
   };
 
   return (

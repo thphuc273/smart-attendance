@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
-import { getApi } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
 
 type AuditAction = 'create' | 'update' | 'delete' | 'override' | 'login' | 'logout';
 
@@ -29,40 +29,27 @@ const ACTIONS: AuditAction[] = ['create', 'update', 'delete', 'override', 'login
 
 export default function AuditLogsPage() {
   const user = useRequireAuth('admin');
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [meta, setMeta] = useState<ListResp['meta']>({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ action: '', entity_type: '', date_from: '', date_to: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (page: number) => {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const api = getApi();
-        const params = new URLSearchParams({ page: String(page), limit: '20' });
-        if (filters.action) params.set('action', filters.action);
-        if (filters.entity_type) params.set('entity_type', filters.entity_type);
-        if (filters.date_from) params.set('date_from', filters.date_from);
-        if (filters.date_to) params.set('date_to', filters.date_to);
-        const resp = await api.get(`audit-logs?${params}`).json<ListResp>();
-        setLogs(resp.data);
-        setMeta(resp.meta);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, user],
-  );
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (filters.action) params.set('action', filters.action);
+  if (filters.entity_type) params.set('entity_type', filters.entity_type);
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
 
-  useEffect(() => {
-    if (user) load(1);
-  }, [user, load]);
+  const query = useApiQuery<ListResp>(
+    queryKeys.auditLogs({ page, ...filters }),
+    `audit-logs?${params}`,
+    !!user,
+  );
+  const logs = query.data?.data ?? [];
+  const meta = query.data?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 };
+  const loading = query.isLoading || query.isFetching;
+  const error = query.error?.message ?? null;
+
+  const load = (p: number) => setPage(p);
 
   if (!user) return null;
 
@@ -79,7 +66,7 @@ export default function AuditLogsPage() {
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            load(1);
+            setPage(1);
           }}
         >
           <label className="text-sm">

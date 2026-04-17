@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
-import { getApi, isAdmin } from '../../lib/api';
+import { isAdmin } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
 
 interface AdminOverview {
   data: {
@@ -38,36 +38,14 @@ interface AnomaliesResp {
 
 export default function DashboardPage() {
   const user = useRequireAuth('manager');
-  const [overview, setOverview] = useState<AdminOverview['data'] | null>(null);
-  const [anomalies, setAnomalies] = useState<AnomaliesResp['data'] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const admin = isAdmin(user);
 
-  useEffect(() => {
-    if (!user) return;
-    const api = getApi();
-    const load = async () => {
-      try {
-        const tasks: Promise<unknown>[] = [
-          api
-            .get('dashboard/anomalies')
-            .json<AnomaliesResp>()
-            .then((r) => setAnomalies(r.data)),
-        ];
-        if (isAdmin(user)) {
-          tasks.push(
-            api
-              .get('dashboard/admin/overview')
-              .json<AdminOverview>()
-              .then((r) => setOverview(r.data)),
-          );
-        }
-        await Promise.all(tasks);
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    };
-    load();
-  }, [user]);
+  const anomaliesQ = useApiQuery<AnomaliesResp>(queryKeys.anomalies(), 'dashboard/anomalies', !!user);
+  const overviewQ = useApiQuery<AdminOverview>(queryKeys.dashboardAdmin(), 'dashboard/admin/overview', !!user && admin);
+
+  const anomalies = anomaliesQ.data?.data ?? null;
+  const overview = overviewQ.data?.data ?? null;
+  const error = anomaliesQ.error?.message ?? overviewQ.error?.message ?? null;
 
   if (!user) return null;
 
@@ -80,7 +58,7 @@ export default function DashboardPage() {
             Xin chào, {user.full_name?.split(' ').slice(-1)[0] ?? 'bạn'} 👋
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            {isAdmin(user)
+            {admin
               ? 'Tổng quan toàn hệ thống — realtime.'
               : 'Tổng quan chi nhánh bạn đang quản lý.'}
           </p>
@@ -90,7 +68,7 @@ export default function DashboardPage() {
           <div className="mb-4 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
         )}
 
-        {isAdmin(user) && overview && (
+        {admin && overview && (
           <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatTile
               label="Nhân viên"
@@ -119,7 +97,7 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {isAdmin(user) && overview && (
+        {admin && overview && (
           <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="card">
               <h3 className="text-sm font-semibold text-slate-900">Trạng thái hôm nay</h3>
@@ -171,7 +149,7 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {isAdmin(user) && overview && overview.checkin_heatmap.length > 0 && (
+        {admin && overview && overview.checkin_heatmap.length > 0 && (
           <section className="mt-6">
             <div className="card">
               <h3 className="text-sm font-semibold text-slate-900">Check-in heatmap (giờ VN)</h3>

@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi } from '../../lib/api';
+import { useApiQuery, queryKeys } from '../../lib/queries';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Session {
   id: string;
@@ -69,8 +71,7 @@ async function getGeoPosition(): Promise<GeolocationPosition> {
 
 export default function CheckinPage() {
   const user = useRequireAuth('employee');
-  const [today, setToday] = useState<Session | null>(null);
-  const [history, setHistory] = useState<Session[]>([]);
+  const qc = useQueryClient();
   const [submitting, setSubmitting] = useState<'in' | 'out' | null>(null);
   const [now, setNow] = useState(() => new Date());
 
@@ -82,22 +83,16 @@ export default function CheckinPage() {
   const [lastResult, setLastResult] = useState<CheckInResp['data'] | null>(null);
   const [errorDebug, setErrorDebug] = useState<unknown>(null);
 
-  const loadHistory = useCallback(async () => {
-    if (!user) return;
-    try {
-      const api = getApi();
-      const resp = await api.get('attendance/me?limit=14').json<HistoryResp>();
-      setHistory(resp.data);
-      const todayVN = vnDateString(new Date());
-      setToday(resp.data.find((s) => vnDateString(new Date(s.workDate)) === todayVN) ?? null);
-    } catch (e) {
-      setMessage({ kind: 'err', text: (e as Error).message });
-    }
-  }, [user]);
+  const historyQ = useApiQuery<HistoryResp>(
+    queryKeys.mySessions({ limit: 14 }),
+    'attendance/me?limit=14',
+    !!user,
+  );
+  const history = historyQ.data?.data ?? [];
+  const todayVN = vnDateString(new Date());
+  const today = history.find((s) => vnDateString(new Date(s.workDate)) === todayVN) ?? null;
 
-  useEffect(() => {
-    if (user) loadHistory();
-  }, [user, loadHistory]);
+  const refreshHistory = () => qc.invalidateQueries({ queryKey: ['sessions', 'me'] });
 
   const doCheck = async (kind: 'in' | 'out') => {
     if (!user) return;
@@ -126,7 +121,7 @@ export default function CheckinPage() {
         kind: 'ok',
         text: `✅ Check-${kind === 'in' ? 'in' : 'out'} thành công tại ${resp.data.branch.name}`,
       });
-      await loadHistory();
+      await refreshHistory();
     } catch (e) {
       let text = (e as Error).message;
       let debug: unknown = null;
