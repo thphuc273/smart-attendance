@@ -1,5 +1,33 @@
-import { IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class WifiScanEntryDto {
+  @ApiProperty({ example: 'Office-5G' })
+  @IsString()
+  ssid!: string;
+
+  @ApiProperty({ example: 'aa:bb:cc:dd:ee:ff' })
+  @IsString()
+  bssid!: string;
+
+  @ApiPropertyOptional({ example: -55 })
+  @IsOptional()
+  @IsInt()
+  rssi?: number;
+}
 
 export class CheckInDto {
   @ApiProperty({ example: 10.777 })
@@ -51,6 +79,14 @@ export class CheckInDto {
   @IsOptional()
   @IsBoolean()
   is_mock_location?: boolean;
+
+  @ApiPropertyOptional({ type: [WifiScanEntryDto], description: 'Full BSSID scan — backend matches any entry against whitelist.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => WifiScanEntryDto)
+  wifi_scan?: WifiScanEntryDto[];
 }
 
 export class CheckOutDto extends CheckInDto {}
