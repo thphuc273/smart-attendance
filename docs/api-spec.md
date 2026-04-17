@@ -531,19 +531,16 @@ Gọi từ `AttendanceService` khi check-in có selfie. Không expose public —
 ## 5D. QR Kiosk module
 
 ### GET `/kiosk/branches/:id/qr-token`
-**Auth:** Kiosk token (cấp riêng cho mỗi branch, header `X-Kiosk-Token`). Public dashboard không gọi được.
+**Auth:** Kiosk token (cấp riêng cho mỗi branch, header `X-Kiosk-Token`). Public dashboard không gọi được. Trả `401 Missing X-Kiosk-Token` nếu header thiếu, `401 Invalid kiosk token` nếu sai hash.
 ```json
 {
-  "data": {
-    "branch_id": "uuid",
-    "token": "v1.HMAC_BASE64_URL",
-    "nonce": "01JKQ...",
-    "exp": "2026-04-17T08:00:30Z",
-    "next_rotate_at": "2026-04-17T08:00:25Z"
-  }
+  "token": "v1.HMAC_BASE64_URL",
+  "expires_at": "2026-04-17T08:00:30Z",
+  "bucket_seconds": 30,
+  "refresh_every_seconds": 25
 }
 ```
-Rotate bucket mỗi 30s. Portal client tự fetch mỗi 25s.
+Rotate bucket mỗi 30s. Portal client tự fetch mỗi `refresh_every_seconds` (mặc định 25s).
 
 ### POST `/attendance/qr-check-in`
 **Role:** employee (mobile scan).
@@ -571,8 +568,19 @@ Rotate bucket mỗi 30s. Portal client tự fetch mỗi 25s.
 - 422 `FACE_NOT_ENROLLED` — employee chưa enroll face
 - 422 `INVALID_LOCATION` — GPS ngoài geofence (QR không fallback WiFi)
 
-### GET|PUT `/branches/:id/qr-secret`
-**Role:** admin. `PUT` rotate HMAC secret (audit log bắt buộc). Response `GET` **không** trả raw secret, chỉ `rotated_at`.
+### PUT `/branches/:id/qr-secret`
+**Role:** admin, **manager** (scope-checked qua `BranchScopeGuard` — manager chỉ rotate được branch mình quản lý). Upsert secret (tạo mới nếu chưa có, rotate nếu đã có). Audit log bắt buộc.
+
+**Response 200:**
+```json
+{
+  "branch_id": "uuid",
+  "kiosk_token": "plaintext — chỉ hiện một lần",
+  "rotated_at": "2026-04-18T08:00:00Z",
+  "note": "Store kiosk_token on the kiosk device now — it will not be shown again."
+}
+```
+`kiosk_token` chỉ trả plaintext **một lần** — DB chỉ giữ sha256 hash. Portal lưu vào `localStorage.kiosk_token_<branchId>` cho Kiosk View trên cùng browser.
 
 ---
 

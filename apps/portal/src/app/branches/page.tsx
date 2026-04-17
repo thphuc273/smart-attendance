@@ -362,7 +362,7 @@ function DetailDrawer({
 
             <ZeroTapSection branchId={branch.id} canEdit={canEdit} />
 
-            <QrSecretSection branchId={branch.id} canEdit={canEdit} />
+            <QrSecretSection branchId={branch.id} canManage={true} />
 
             {canEdit && (
               <div className="mt-8 border-t border-slate-200 pt-4">
@@ -836,27 +836,29 @@ function ZeroTapSection({ branchId, canEdit }: { branchId: string; canEdit: bool
   );
 }
 
-function QrSecretSection({ branchId, canEdit }: { branchId: string; canEdit: boolean }) {
+function QrSecretSection({ branchId, canManage }: { branchId: string; canManage: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastToken, setLastToken] = useState<string | null>(null);
 
-  const ensureSecret = async () => {
+  const rotateSecret = async () => {
+    if (!confirm('Rotate sẽ vô hiệu hóa kiosk token hiện tại. Tiếp tục?')) return;
     setLoading(true); setError(null);
     try {
-      await getApi().post(`branches/${branchId}/qr-secret/ensure`);
-      alert('Secret Ensure called successfully');
+      const resp = await getApi().put(`branches/${branchId}/qr-secret`).json<{ kiosk_token: string }>();
+      setLastToken(resp.kiosk_token);
+      localStorage.setItem(`kiosk_token_${branchId}`, resp.kiosk_token);
     } catch(e) { setError((e as Error).message); }
     finally { setLoading(false); }
   };
 
-  const rotateSecret = async () => {
-    if (!confirm('Rotate will invalidate the current Kiosk token immediately. Proceed?')) return;
-    setLoading(true); setError(null);
-    try {
-      await getApi().post(`branches/${branchId}/qr-secret/rotate`);
-      alert('Secret Rotated. Please refresh Kiosk.');
-    } catch(e) { setError((e as Error).message); }
-    finally { setLoading(false); }
+  const openKiosk = () => {
+    const stored = localStorage.getItem(`kiosk_token_${branchId}`);
+    if (!stored) {
+      alert('Chưa có kiosk token cho chi nhánh này. Bấm "Rotate Secret" trước để tạo.');
+      return;
+    }
+    window.open(`/kiosk/${branchId}`, '_blank', 'noopener');
   };
 
   return (
@@ -864,17 +866,23 @@ function QrSecretSection({ branchId, canEdit }: { branchId: string; canEdit: boo
       <h3 className="text-sm font-semibold">QR Kiosk</h3>
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
       <div className="mt-2 flex flex-col gap-2">
-        <a href={`/kiosk/${branchId}`} target="_blank" className="text-sm text-brand-600 hover:underline">
+        <button onClick={openKiosk} className="text-left text-sm text-brand-600 hover:underline">
           ↗ Open Kiosk View
-        </a>
-        {canEdit && (
-          <div className="flex gap-2">
-            <button onClick={ensureSecret} disabled={loading} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
-              Ensure Secret
-            </button>
-            <button onClick={rotateSecret} disabled={loading} className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50">
-              Rotate Secret
-            </button>
+        </button>
+        {canManage && (
+          <button
+            onClick={rotateSecret}
+            disabled={loading}
+            className="self-start rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {loading ? 'Đang xử lý…' : 'Rotate Secret'}
+          </button>
+        )}
+        {lastToken && (
+          <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs">
+            <p className="font-semibold text-amber-800">Kiosk token mới (chỉ hiển thị một lần):</p>
+            <code className="mt-1 block break-all font-mono text-[11px]">{lastToken}</code>
+            <p className="mt-1 text-amber-700">Đã lưu vào trình duyệt này cho Kiosk View. Copy để dùng ở thiết bị khác.</p>
           </div>
         )}
       </div>

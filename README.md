@@ -23,8 +23,10 @@ Check-in/out qua GPS geofencing + WiFi SSID/BSSID, **Trust Score**, **Anomaly Da
 ## 🚀 Quick start
 
 ### Yêu cầu
-- Node ≥ 20.11 + pnpm 10.33
+- Node **20 hoặc 22 LTS** (Node 25+ phá ESM resolver của `@expo/metro` — **không dùng**)
+- pnpm 10.33
 - Docker + Docker Compose
+- Mobile dev: Expo SDK 54, Node 22 LTS khuyến nghị; pnpm cần `shamefully-hoist=true` (đã set ở `.npmrc` root) để Expo CLI resolve được metro packages
 
 ### Chạy bằng Docker (1 lệnh)
 ```bash
@@ -158,6 +160,7 @@ Xem [`docs/sprint-plan.md`](docs/sprint-plan.md).
 - **Portal & Mobile UI**: Đã hoàn thiện toàn màn hình Kiosk `/kiosk/[branchId]`, Mobile tích hợp Camera Scanner với Expo, Streak Widget và bật/tắt thiết lập Zero-tap độc lập trên App.
 - **Security & QA**: Throttler Guard (`3 req/min` per-device cho Zero-tap, `5 req/min` Kiosk, `100 req/h` cho QR token), bao phủ kèm e2e test Replay Attack mock hoàn chỉnh.
 - **Day 5 hardening (Session #013)**: rename `ZeroTapRevokeReason` enum theo spec (`mock_location_detected/admin_disabled/attestation_failed/branch_disabled/user_opt_out`); auto-revoke device khi phát hiện mock-location / thiếu attestation + cron `zero-tap-revoke-cleanup` (08:00 VN) phục hồi sau 7 ngày; cascade revoke khi admin disable branch policy; manager scope guard cho policy/revoke endpoint; `kiosk_token` lưu sha256 hash + plaintext chỉ trả 1 lần qua `PUT /branches/:id/qr-secret`; QR check-in chặn `BRANCH_NOT_ASSIGNED`; nonce DTO regex `[A-Za-z0-9_-]{16,128}`; full audit log cho rotate/revoke/policy change. **171/171 unit test xanh, build sạch.**
+- **Kiosk UX & Manager access (Session #014, 2026-04-18)**: Manager **quản lý chi nhánh nào thì tạo QR kiosk được cho chi nhánh đó** (enforce qua `BranchScopeGuard` trên `PUT /branches/:id/qr-secret`). Portal rewrite `/kiosk/[branchId]` — gửi `X-Kiosk-Token` header, setup form cho thiết bị chưa có token, fix response shape (`{token, expires_at, bucket_seconds, refresh_every_seconds}`). Branch detail hiển thị plaintext kiosk token inline sau rotate + auto-lưu `localStorage` cho Kiosk View cùng browser. Xoá endpoint chết `POST .../qr-secret/ensure`.
 
 ---
 
