@@ -134,8 +134,16 @@ Wrap qua interceptor `ResponseTransformInterceptor`.
   - `badge` — rounded-full pill
 - Brand palette trong `tailwind.config.ts`: `brand` (indigo 50-900), `accent` (teal), `bg-brand-gradient`, `shadow-card`
 - Font: Inter qua `rsms.me/inter` CDN (globals.css import). Switch sang `next/font/google` nếu cần self-host cho demo offline
-- State: **Zustand** cho client state, TanStack Query cho server state tương tác (optional — hiện đang dùng `ky` + local `useState`)
+- Logo: `public/finos-logo.png` (FinOS brand), load qua `next/image` với `priority` cho LCP
+- **Server state: TanStack Query** (`@tanstack/react-query`) qua `lib/queries.ts`:
+  - `useApiQuery<T>(key, path, enabled?)` — typed GET wrapper trả về `UseQueryResult`
+  - `useApiMutation(fn, invalidate[])` — mutation + key-prefix invalidation
+  - `queryKeys` factory — hierarchical (vd `['employees', id, 'devices']`) để invalidate branch cascade
+  - Global defaults: `staleTime 30s`, `refetchOnWindowFocus`, `retry 1`; mutations `retry 0`
+  - QueryProvider wrap toàn bộ app trong `layout.tsx`
+- **Client state:** local `useState` + React Query cache. Zustand dự phòng nếu cần global non-server state
 - Form: react-hook-form + zod (dùng chung schema với mobile)
+- **i18n**: status enum hiển thị qua `STATUS_LABEL` map tiếng Việt (`on_time → Đúng giờ`, etc). Value gửi lên API vẫn là enum gốc
 
 ### 4.7 Testing
 - Unit test cho mọi service (logic nghiệp vụ): trust score, validation, schedule
