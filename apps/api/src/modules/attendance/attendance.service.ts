@@ -540,7 +540,7 @@ export class AttendanceService {
       if (dto.date_to) where.workDate.lte = dto.date_to;
     }
 
-    const [total, data] = await Promise.all([
+    const [total, items] = await Promise.all([
       this.prisma.attendanceSession.count({ where }),
       this.prisma.attendanceSession.findMany({
         where,
@@ -551,7 +551,7 @@ export class AttendanceService {
     ]);
 
     return {
-      data,
+      items,
       meta: {
         total,
         page: dto.page,
@@ -571,7 +571,7 @@ export class AttendanceService {
       });
       const branchIds = managed.map((m) => m.branchId);
       if (branchIds.length === 0) {
-        return { data: [], meta: { total: 0, page: 1, limit: dto.limit, total_pages: 1 } };
+        return { items: [], meta: { total: 0, page: 1, limit: dto.limit, total_pages: 1 } };
       }
       where.branchId = { in: branchIds };
     }
@@ -610,7 +610,7 @@ export class AttendanceService {
     }));
 
     return {
-      data: mappedData,
+      items: mappedData,
       meta: {
         total,
         page: dto.page,

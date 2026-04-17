@@ -1,10 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import ky from 'ky';
+import { storeAuth } from '../../lib/api';
+import { homeFor } from '../../lib/auth';
 
 const schema = z.object({
   email: z.string().email(),
@@ -12,22 +15,30 @@ const schema = z.object({
 });
 type Form = z.infer<typeof schema>;
 
-const api = ky.create({ prefixUrl: process.env.NEXT_PUBLIC_API_BASE_URL });
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
+
+interface LoginResponse {
+  data: {
+    access_token: string;
+    refresh_token: string;
+    user: { id: string; email: string; full_name: string; roles: string[] };
+  };
+}
 
 export default function LoginPage() {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const { register, handleSubmit, formState } = useForm<Form>({ resolver: zodResolver(schema) });
+  const { register, handleSubmit, formState } = useForm<Form>({
+    resolver: zodResolver(schema),
+    defaultValues: { email: 'admin@demo.com', password: 'Admin@123' },
+  });
 
   const onSubmit = async (form: Form) => {
     setError(null);
-    setSuccess(null);
     try {
-      const res: { data: { access_token: string; user: { email: string; roles: string[] } } } = await api
-        .post('auth/login', { json: form })
-        .json();
-      localStorage.setItem('access_token', res.data.access_token);
-      setSuccess(`Logged in as ${res.data.user.email} (${res.data.user.roles.join(', ')})`);
+      const res = await ky.post(`${API_BASE_URL}/auth/login`, { json: form }).json<LoginResponse>();
+      storeAuth(res.data.access_token, res.data.user);
+      router.replace(homeFor(res.data.user));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -67,7 +78,6 @@ export default function LoginPage() {
           {formState.isSubmitting ? 'Đang đăng nhập…' : 'Đăng nhập'}
         </button>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-green-700">{success}</p>}
       </form>
     </main>
   );

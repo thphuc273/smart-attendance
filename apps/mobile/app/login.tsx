@@ -37,7 +37,7 @@ export default function LoginScreen() {
       const res = await ky.post(`${API_BASE_URL}/auth/login`, { json: form }).json<LoginResponse>();
       await SecureStore.setItemAsync('access_token', res.data.access_token);
       await SecureStore.setItemAsync('refresh_token', res.data.refresh_token);
-      router.replace('/');
+      router.replace('/history' as never);
     } catch (e) {
       Alert.alert('Đăng nhập thất bại', (e as Error).message);
     } finally {

@@ -58,7 +58,7 @@ describe('ReportsService', () => {
 
       const result = await service.createExport('admin-1', true, dto);
 
-      expect(result).toEqual({ data: { job_id: 'job-uuid', status: 'queued' } });
+      expect(result).toEqual({ job_id: 'job-uuid', status: 'queued' });
       expect(exportQueue.add).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ reportExportId: 'job-uuid', branch_id: 'branch-1' }),
@@ -77,7 +77,7 @@ describe('ReportsService', () => {
       prisma.managerBranch.findUnique.mockResolvedValueOnce({ branchId: 'branch-1' });
       prisma.reportExport.create.mockResolvedValueOnce({ id: 'job-uuid', status: 'queued' });
       const result = await service.createExport('manager-1', false, dto);
-      expect(result.data.job_id).toBe('job-uuid');
+      expect(result.job_id).toBe('job-uuid');
     });
   });
 
@@ -91,9 +91,9 @@ describe('ReportsService', () => {
         expiresAt: new Date(Date.now() + 3600_000),
       });
       const result = await service.getExportStatus('admin-1', true, 're-1');
-      expect(result.data.status).toBe('completed');
-      expect(result.data.download_url).toContain('/re-1/download');
-      expect(result.data.row_count).toBe(42);
+      expect(result.status).toBe('completed');
+      expect(result.download_url).toContain('/re-1/download');
+      expect(result.row_count).toBe(42);
     });
 
     it('forbids cross-user access for non-admins', async () => {

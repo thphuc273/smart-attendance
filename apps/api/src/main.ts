@@ -18,9 +18,14 @@ async function bootstrap() {
   const allowed =
     process.env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ??
     ['http://localhost:3100', 'http://localhost:8081', 'http://localhost:19006'];
+  const isDev = process.env.NODE_ENV !== 'production';
+  // In dev, also allow any localhost/LAN origin so phones on the same WiFi can test.
+  const lanOriginRegex = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
   app.enableCors({
     origin: (origin, cb) => {
-      if (!origin || allowed.includes(origin)) return cb(null, true);
+      if (!origin) return cb(null, true);
+      if (allowed.includes(origin)) return cb(null, true);
+      if (isDev && lanOriginRegex.test(origin)) return cb(null, true);
       return cb(new Error(`Origin ${origin} not allowed`));
     },
     credentials: true,
