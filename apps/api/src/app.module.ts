@@ -1,8 +1,10 @@
 import { join } from 'node:path';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { CacheModule } from '@nestjs/cache-manager';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { redisStore } from 'cache-manager-ioredis-yet';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -14,6 +16,7 @@ import { QueueModule } from './modules/queue/queue.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { ZeroTapModule } from './modules/zero-tap/zero-tap.module';
 
 @Module({
   imports: [
@@ -26,6 +29,18 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
       ],
     }),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
+    CacheModule.registerAsync({
+      isGlobal: true,
+      inject: [ConfigService],
+      useFactory: async (config: ConfigService) => {
+        const host = config.get<string>('REDIS_HOST') ?? 'localhost';
+        const port = Number(config.get<string>('REDIS_PORT') ?? 6379);
+        return {
+          store: await redisStore({ host, port }),
+          ttl: 60_000,
+        };
+      },
+    }),
     PrismaModule,
     AuthModule,
     BranchesModule,
@@ -36,6 +51,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
     ReportsModule,
     WorkSchedulesModule,
     AuditLogsModule,
+    ZeroTapModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

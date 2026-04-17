@@ -56,6 +56,27 @@ services:
       - '${API_PORT:-3000}:3000'
     # Prisma migrate deploy + seed chạy trong entrypoint.sh
 
+  portal:
+    build:
+      context: .
+      dockerfile: apps/portal/Dockerfile
+      args:
+        # Build-time baking: browser code phải biết URL public của api khi
+        # container chạy. Default: port-mapped localhost:3000.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3000/api/v1}
+    container_name: sa-portal
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3000/api/v1}
+    ports:
+      - '${PORTAL_PORT:-3100}:3100'
+
 volumes:
   postgres-data:
   redis-data:

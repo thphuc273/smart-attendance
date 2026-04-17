@@ -161,6 +161,15 @@ export class EmployeesService {
         },
       });
 
+      if (roleCode === 'manager') {
+        await tx.managerBranch.create({
+          data: {
+            userId: user.id,
+            branchId: dto.primary_branch_id,
+          },
+        });
+      }
+
       return employee;
     });
 
@@ -208,6 +217,21 @@ export class EmployeesService {
 
       if (Object.keys(empUpdate).length > 0) {
         await tx.employee.update({ where: { id: employeeId }, data: empUpdate });
+      }
+
+      // If user is a manager and primary branch changes, also grant them manager access to the new branch
+      if (dto.primary_branch_id) {
+        const userRoles = await tx.userRole.findMany({
+          where: { userId: emp.userId },
+          include: { role: true },
+        });
+        if (userRoles.some((ur) => ur.role.code === 'manager')) {
+          await tx.managerBranch.upsert({
+            where: { userId_branchId: { userId: emp.userId, branchId: dto.primary_branch_id } },
+            update: {},
+            create: { userId: emp.userId, branchId: dto.primary_branch_id },
+          });
+        }
       }
     });
 
