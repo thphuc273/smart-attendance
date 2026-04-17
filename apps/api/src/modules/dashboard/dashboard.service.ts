@@ -3,20 +3,30 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
 
+/** UTC-midnight Date that represents today in VN calendar (UTC+7). */
+function todayInVN(): Date {
+  const nowMs = Date.now() + 7 * 3600 * 1000;
+  const vn = new Date(nowMs);
+  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate()));
+}
+
 @Injectable()
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getAdminOverview() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // VN calendar day — independent of server TZ. daily_attendance_summaries
+    // is populated by cron 00:30 so it's empty on fresh DB / before cron runs.
+    // Source of truth for TODAY = attendanceSession directly; summary is for
+    // historical dashboards only.
+    const today = todayInVN();
     const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
-    const [totalActiveEmployees, totalActiveBranches, todaySummaries, heatmapRows] = await Promise.all([
+    const [totalActiveEmployees, totalActiveBranches, todaySessions, heatmapRows] = await Promise.all([
       this.prisma.employee.count({ where: { employmentStatus: 'active' } }),
       this.prisma.branch.count({ where: { status: 'active' } }),
-      this.prisma.dailyAttendanceSummary.findMany({
+      this.prisma.attendanceSession.findMany({
         where: { workDate: today },
         include: { branch: { select: { id: true, name: true } } },
       }),
@@ -34,19 +44,18 @@ export class DashboardService {
       `,
     ]);
 
-    // Aggregate today
+    // Aggregate today — checkedIn = has non-null checkInAt
     let checkedIn = 0;
     let onTime = 0;
     let late = 0;
     let absent = 0;
 
-    // Branches stats
     const branchStats: Record<string, { id: string; name: string; total: number; onTime: number; late: number }> = {};
 
-    todaySummaries.forEach((s) => {
-      checkedIn++;
+    todaySessions.forEach((s) => {
+      if (s.checkInAt) checkedIn++;
       if (s.status === 'on_time') onTime++;
-      else if (s.status === 'late') late++;
+      else if (s.status === 'late' || s.status === 'overtime' || s.status === 'early_leave' || s.status === 'missing_checkout') late++;
       else if (s.status === 'absent') absent++;
 
       if (!branchStats[s.branchId]) {
@@ -104,13 +113,9 @@ export class DashboardService {
     });
     if (!branch) throw new NotFoundException('Branch not found');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // 7 days ago
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    weekAgo.setHours(0, 0, 0, 0);
+    const today = todayInVN();
+    const weekAgo = new Date(today);
+    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
     const [branchEmployees, todaySessions, lowTrustToday, weekSummaries] = await Promise.all([
       this.prisma.employee.count({
@@ -216,12 +221,11 @@ export class DashboardService {
   }
 
   async getAnomalies(managerUserId: string, isSuperAdmin: boolean) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = todayInVN();
     const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
+    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
     let scopedBranchIds: string[] | null = null;
     if (!isSuperAdmin) {
