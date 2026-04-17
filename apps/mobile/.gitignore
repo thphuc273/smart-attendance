@@ -4,3 +4,7 @@
 
 expo-env.d.ts
 # @end expo-cli
+
+# Local env — contains LAN IP specific to each dev's Mac
+.env
+.env.local
