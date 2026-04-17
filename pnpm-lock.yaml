@@ -195,6 +195,9 @@ importers:
       ky:
         specifier: ^1.7.4
         version: 1.14.3
+      metro-runtime:
+        specifier: ^0.84.3
+        version: 0.84.3
       react:
         specifier: 19.1.0
         version: 19.1.0
@@ -5007,6 +5010,10 @@ packages:
   metro-runtime@0.83.3:
     resolution: {integrity: sha512-JHCJb9ebr9rfJ+LcssFYA2x1qPYuSD/bbePupIGhpMrsla7RCwC/VL3yJ9cSU+nUhU4c9Ixxy8tBta+JbDeZWw==}
     engines: {node: '>=20.19.4'}
+
+  metro-runtime@0.84.3:
+    resolution: {integrity: sha512-o7HLRfMyVk9N2dUZ9VjQfB6xxUItL9Pi9WcqxURE7MEKOH6wbGt9/E92YdYLluTOtkzYAEVfdC6h6lcxqA+hMQ==}
+    engines: {node: ^20.19.4 || ^22.13.0 || ^24.3.0 || >= 25.0.0}
 
   metro-source-map@0.83.3:
     resolution: {integrity: sha512-xkC3qwUBh2psVZgVavo8+r2C9Igkk3DibiOXSAht1aYRRcztEZNFtAMtfSB7sdO2iFMx2Mlyu++cBxz/fhdzQg==}
@@ -12714,6 +12721,11 @@ snapshots:
       flow-enums-runtime: 0.0.6
 
   metro-runtime@0.83.3:
+    dependencies:
+      '@babel/runtime': 7.29.2
+      flow-enums-runtime: 0.0.6
+
+  metro-runtime@0.84.3:
     dependencies:
       '@babel/runtime': 7.29.2
       flow-enums-runtime: 0.0.6
