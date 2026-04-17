@@ -138,7 +138,7 @@ Backend:
 
 **Thiết kế token (TOTP-style):**
 - `token = HMAC_SHA256(secret, branch_id + time_bucket)` với `time_bucket = floor(unix_ts / 30)`
-- Portal client fetch `/kiosk/branches/:id/qr-token` mỗi 25s, nhận `{ token, exp, nonce, next_rotate_at }`
+- Portal client fetch `/kiosk/branches/:id/qr-token` mỗi `refresh_every_seconds` (25s), gửi `X-Kiosk-Token` header, nhận `{ token, expires_at, bucket_seconds, refresh_every_seconds }`
 - Valid 30 giây (cho phép lệch 1 bucket về trước để tolerant drift)
 - Secret lưu trong `branch_qr_secrets.hmac_secret`, rotate thủ công qua admin UI
 
@@ -160,6 +160,11 @@ Backend:
 **Bảo mật:**
 - QR bị chụp màn hình replay → vẫn chặn vì (a) token hết hạn sau 30s, (b) cần selfie live, (c) cần GPS trong geofence, (d) one-time-per-day
 - Kiosk page chạy chế độ fullscreen, no-chrome; có route auth riêng (kiosk token) để không ai vô tình mở từ laptop ngoài
+
+**Phân quyền & UX portal (v0.4.1 — 2026-04-18):**
+- Rotate secret: **admin** hoặc **manager** quản lý branch đó (enforce qua `BranchScopeGuard`).
+- Response rotate trả `kiosk_token` plaintext **một lần**; portal hiển thị inline để copy và tự lưu vào `localStorage.kiosk_token_<branchId>` cho Kiosk View trên cùng trình duyệt.
+- Mở Kiosk View ở thiết bị khác (iPad, kiosk máy riêng): admin/manager copy `kiosk_token` rồi dán vào form setup của `/kiosk/:branchId` (form lưu token vào localStorage device đó, sau đó gửi qua header `X-Kiosk-Token` khi poll QR).
 
 ### 4.5 Quên check-out
 
@@ -512,8 +517,8 @@ Zero-tap có bề mặt tấn công khác vì không có user interaction:
 - `GET  /ai/chat/history`
 
 ### 9.9 Kiosk
-- `GET  /kiosk/branches/:id/qr-token` (kiosk auth)
-- `GET|PUT /branches/:id/qr-secret` (admin, rotate HMAC)
+- `GET  /kiosk/branches/:id/qr-token` (kiosk auth — header `X-Kiosk-Token`)
+- `PUT  /branches/:id/qr-secret` (admin hoặc manager-trong-scope; rotate HMAC + trả plaintext kiosk token **một lần**)
 
 ### 9.7 Schedules
 - `GET  /work-schedules`

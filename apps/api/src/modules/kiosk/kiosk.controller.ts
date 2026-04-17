@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleCode } from '@prisma/client';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { BranchScopeGuard } from '../../common/guards/branch-scope.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { KioskService } from './kiosk.service';
@@ -37,8 +38,8 @@ export class KioskController {
   @ApiBearerAuth()
   @Put('branches/:id/qr-secret')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(RoleCode.admin)
+  @UseGuards(JwtAuthGuard, RolesGuard, BranchScopeGuard)
+  @Roles(RoleCode.admin, RoleCode.manager)
   rotate(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.service.rotate(id, actor.id);
   }
