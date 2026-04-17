@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -9,7 +9,8 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getApi, hasToken } from './_lib/api';
+import { getApi, getStoredUser, hasToken, type StoredUser } from './_lib/api';
+import { colors, radius, shadow, statusTone } from './_lib/theme';
 
 interface Session {
   id: string;
@@ -28,8 +29,18 @@ interface Resp {
   meta: { total: number; page: number; limit: number; total_pages: number };
 }
 
+function vnDateString(d: Date): string {
+  return new Intl.DateTimeFormat('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+  }).format(d);
+}
+
 export default function HistoryScreen() {
   const router = useRouter();
+  const [user, setUser] = useState<StoredUser | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +48,7 @@ export default function HistoryScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const api = getApi();
-      const resp = await api.get('attendance/me?limit=30').json<Resp>();
+      const resp = await getApi().get('attendance/me?limit=30').json<Resp>();
       setSessions(resp.data);
     } catch (e) {
       setError((e as Error).message);
@@ -50,9 +60,10 @@ export default function HistoryScreen() {
   useEffect(() => {
     (async () => {
       if (!(await hasToken())) {
-        router.replace('/login');
+        router.replace('/login' as never);
         return;
       }
+      setUser(await getStoredUser());
       await load();
     })();
   }, [load, router]);
@@ -60,7 +71,7 @@ export default function HistoryScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.brand600} />
       </View>
     );
   }
@@ -68,20 +79,24 @@ export default function HistoryScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={styles.back}>← Check-in</Text>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+          <Text style={styles.backText}>← Quay lại</Text>
         </Pressable>
         <Text style={styles.title}>Lịch sử</Text>
         <View style={{ width: 80 }} />
       </View>
 
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
 
       <FlatList
         data={sessions}
         keyExtractor={(s) => s.id}
-        contentContainerStyle={{ padding: 12 }}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={colors.brand600} />}
         ListEmptyComponent={<Text style={styles.empty}>Chưa có session nào.</Text>}
         renderItem={({ item }) => (
           <Pressable onPress={() => router.push(`/session/${item.id}` as never)}>
@@ -94,106 +109,98 @@ export default function HistoryScreen() {
 }
 
 function SessionRow({ session }: { session: Session }) {
-  const date = new Date(session.workDate).toLocaleDateString('vi-VN', {
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-  });
   const inTime = session.checkInAt
     ? new Date(session.checkInAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
     : '—';
   const outTime = session.checkOutAt
     ? new Date(session.checkOutAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
     : '—';
-
-  const tone = STATUS_TONE[session.status] ?? { bg: '#e2e8f0', fg: '#334155' };
+  const tone = statusTone[session.status] ?? {
+    bg: colors.slate100,
+    fg: colors.slate600,
+    label: session.status,
+  };
 
   return (
     <View style={styles.card}>
       <View style={styles.rowBetween}>
-        <Text style={styles.date}>{date}</Text>
-        <View style={[styles.badge, { backgroundColor: tone.bg }]}>
-          <Text style={[styles.badgeText, { color: tone.fg }]}>{session.status}</Text>
+        <Text style={styles.date}>{vnDateString(new Date(session.workDate))}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: tone.bg }]}>
+          <Text style={[styles.statusBadgeText, { color: tone.fg }]}>{tone.label}</Text>
         </View>
       </View>
-      <View style={[styles.rowBetween, { marginTop: 8 }]}>
-        <Text style={styles.time}>
-          In {inTime} → Out {outTime}
-        </Text>
-        {session.trustScore !== null && (
-          <Text style={[styles.trustBase, trustColor(session.trustScore)]}>
-            Trust {session.trustScore}
-          </Text>
-        )}
+      <View style={[styles.rowBetween, { marginTop: 10 }]}>
+        <View style={styles.timeCol}>
+          <Text style={styles.timeLabel}>In</Text>
+          <Text style={styles.timeValue}>{inTime}</Text>
+        </View>
+        <View style={styles.timeCol}>
+          <Text style={styles.timeLabel}>Out</Text>
+          <Text style={styles.timeValue}>{outTime}</Text>
+        </View>
       </View>
       {(session.lateMinutes || session.overtimeMinutes) && (
-        <View style={[styles.rowBetween, { marginTop: 6 }]}>
+        <View style={styles.deltaRow}>
           {session.lateMinutes ? (
-            <Text style={styles.late}>⏰ Late {session.lateMinutes}m</Text>
-          ) : (
-            <Text />
-          )}
+            <View style={[styles.deltaPill, { backgroundColor: colors.amber100 }]}>
+              <Text style={[styles.deltaText, { color: colors.amber700 }]}>
+                Late {session.lateMinutes}m
+              </Text>
+            </View>
+          ) : null}
           {session.overtimeMinutes ? (
-            <Text style={styles.ot}>✨ OT {session.overtimeMinutes}m</Text>
-          ) : (
-            <Text />
-          )}
+            <View style={[styles.deltaPill, { backgroundColor: colors.emerald100 }]}>
+              <Text style={[styles.deltaText, { color: colors.emerald700 }]}>
+                OT {session.overtimeMinutes}m
+              </Text>
+            </View>
+          ) : null}
         </View>
       )}
     </View>
   );
 }
 
-const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
-  on_time: { bg: '#dcfce7', fg: '#166534' },
-  late: { bg: '#fef3c7', fg: '#92400e' },
-  overtime: { bg: '#e0f2fe', fg: '#0369a1' },
-  early_leave: { bg: '#fee2e2', fg: '#991b1b' },
-  absent: { bg: '#fee2e2', fg: '#991b1b' },
-  missing_checkout: { bg: '#fef3c7', fg: '#92400e' },
-};
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    paddingTop: 60,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    paddingTop: 56,
+    backgroundColor: colors.surface,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
   },
-  title: { fontSize: 20, fontWeight: '700' },
-  back: { color: '#0f172a', fontSize: 14, fontWeight: '500' },
-  logout: { color: '#64748b', fontSize: 13 },
-  error: { padding: 12, color: '#dc2626', fontSize: 13 },
-  empty: { textAlign: 'center', padding: 40, color: '#64748b' },
+  backBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    backgroundColor: colors.slate100,
+  },
+  backText: { color: colors.brand700, fontSize: 13, fontWeight: '600' },
+  title: { fontSize: 18, fontWeight: '700', color: colors.slate900 },
+  errorBox: { margin: 16, backgroundColor: colors.rose100, padding: 12, borderRadius: radius.md },
+  errorText: { color: colors.rose700, fontSize: 13 },
+  empty: { textAlign: 'center', padding: 40, color: colors.slate400 },
   card: {
-    backgroundColor: '#fff',
-    padding: 14,
-    borderRadius: 10,
+    backgroundColor: colors.surface,
+    padding: 16,
+    borderRadius: radius.md,
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    ...shadow.card,
   },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  date: { fontSize: 15, fontWeight: '600' },
-  time: { fontSize: 13, color: '#475569' },
-  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  late: { color: '#92400e', fontSize: 12 },
-  ot: { color: '#0369a1', fontSize: 12 },
-  trustBase: { fontSize: 12, fontWeight: '600' },
+  date: { fontSize: 15, fontWeight: '700', color: colors.slate900 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 2, borderRadius: radius.full },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' },
+  timeCol: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  timeLabel: { fontSize: 11, color: colors.slate400, fontWeight: '600' },
+  timeValue: { fontSize: 14, color: colors.slate700, fontFamily: 'Menlo', fontWeight: '600' },
+  deltaRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  deltaPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.sm },
+  deltaText: { fontSize: 11, fontWeight: '700' },
 });
-
-function trustColor(score: number) {
-  if (score >= 70) return { color: '#166534' };
-  if (score >= 40) return { color: '#92400e' };
-  return { color: '#991b1b' };
-}

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,21 +12,24 @@ import {
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
-import { getApi, hasToken, clearAuth } from './_lib/api';
+import { getApi, getStoredUser, hasToken, type StoredUser } from './_lib/api';
 import { getDeviceFingerprint, getDeviceName, getPlatform } from './_lib/device';
+import { colors, radius, shadow, statusTone } from './_lib/theme';
+import { Header } from './_components/Header';
 
-interface SessionSummary {
+interface Session {
   id: string;
   workDate: string;
   status: string;
   checkInAt: string | null;
   checkOutAt: string | null;
-  lateMinutes: number | null;
+  workedMinutes: number | null;
   overtimeMinutes: number | null;
+  lateMinutes: number | null;
   trustScore: number | null;
 }
 
-interface CheckInResult {
+interface CheckResult {
   session_id: string;
   status: string;
   trust_score: number;
@@ -41,26 +43,35 @@ interface CheckInResult {
   overtime_minutes?: number;
 }
 
-export default function CheckInScreen() {
+function vnDateString(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(d);
+}
+
+export default function CheckinScreen() {
   const router = useRouter();
-  const [today, setToday] = useState<SessionSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<StoredUser | null>(null);
+  const [today, setToday] = useState<Session | null>(null);
   const [submitting, setSubmitting] = useState<'in' | 'out' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const [lastResult, setLastResult] = useState<CheckInResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const loadToday = useCallback(async () => {
     try {
-      const api = getApi();
-      const resp = await api
-        .get('attendance/me?limit=1')
-        .json<{ data: SessionSummary[] }>();
-      const todayISO = new Date().toISOString().slice(0, 10);
-      setToday(resp.data.find((s) => s.workDate.slice(0, 10) === todayISO) ?? null);
+      const r = await getApi().get('attendance/me?limit=1').json<{ data: Session[] }>();
+      const todayVN = vnDateString(new Date());
+      setToday(r.data.find((s) => vnDateString(new Date(s.workDate)) === todayVN) ?? null);
     } catch (e) {
       setMessage({ kind: 'err', text: (e as Error).message });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -70,45 +81,41 @@ export default function CheckInScreen() {
         router.replace('/login' as never);
         return;
       }
+      const u = await getStoredUser();
+      if (!u) {
+        router.replace('/login' as never);
+        return;
+      }
+      setUser(u);
       await loadToday();
     })();
-  }, [loadToday, router]);
+  }, [router, loadToday]);
 
   const doCheck = async (kind: 'in' | 'out') => {
     setSubmitting(kind);
     setMessage(null);
-    setLastResult(null);
     try {
-      // Request foreground location permission
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        throw new Error('Cần cho phép truy cập vị trí để chấm công');
-      }
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-
-      const fingerprint = await getDeviceFingerprint();
+      if (status !== 'granted') throw new Error('Cần quyền truy cập vị trí để chấm công');
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
 
       const body = {
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
         accuracy_meters: Math.round(pos.coords.accuracy ?? 0),
-        device_fingerprint: fingerprint,
+        device_fingerprint: await getDeviceFingerprint(),
         platform: getPlatform(),
         device_name: getDeviceName(),
         app_version: Constants.expoConfig?.version ?? '0.1.0',
         is_mock_location: pos.mocked ?? false,
       };
 
-      const api = getApi();
-      const resp = await api
+      const r = await getApi()
         .post(`attendance/check-${kind}`, { json: body })
-        .json<{ data: CheckInResult }>();
-      setLastResult(resp.data);
+        .json<{ data: CheckResult }>();
       setMessage({
         kind: 'ok',
-        text: `✅ Check-${kind} thành công tại ${resp.data.branch.name} · Trust ${resp.data.trust_score}/100`,
+        text: `✅ Check-${kind === 'in' ? 'in' : 'out'} thành công tại ${r.data.branch.name}`,
       });
       await loadToday();
     } catch (e) {
@@ -120,245 +127,223 @@ export default function CheckInScreen() {
             error?: {
               code?: string;
               message?: string;
-              details?: { distance_meters?: number; risk_flags?: string[] };
+              details?: { hint?: string; distance_meters?: number | null };
             };
           };
           if (body.error) {
-            text = `❌ ${body.error.code}: ${body.error.message}`;
-            if (body.error.details?.distance_meters !== undefined) {
+            text = `❌ ${body.error.message}`;
+            if (body.error.details?.hint) text += `\n💡 ${body.error.details.hint}`;
+            else if (body.error.details?.distance_meters != null) {
               text += ` (cách geofence ${body.error.details.distance_meters}m)`;
             }
           }
         }
       } catch {
-        // fallback
+        /* fallback */
       }
-      Alert.alert('Lỗi chấm công', text);
+      Alert.alert('Chấm công thất bại', text);
       setMessage({ kind: 'err', text });
     } finally {
       setSubmitting(null);
     }
   };
 
-  const logout = async () => {
-    await clearAuth();
-    router.replace('/login' as never);
-  };
-
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.brand600} />
       </View>
     );
   }
 
   const checkedIn = !!today?.checkInAt;
   const checkedOut = !!today?.checkOutAt;
+  const tone = today
+    ? statusTone[today.status] ?? { bg: colors.slate100, fg: colors.slate600, label: today.status }
+    : null;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={loadToday} />}
-    >
-      <View style={styles.header}>
-        <View style={styles.brand}>
-          <Image
-            source={require('../assets/finos-logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
+    <View style={styles.container}>
+      <Header title="Chấm công" user={user} />
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadToday();
+            }}
+            tintColor={colors.brand600}
           />
-          <Text style={styles.title}>Chấm công</Text>
-        </View>
-        <Pressable onPress={logout} hitSlop={8}>
-          <Text style={styles.logout}>Logout</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>Hôm nay</Text>
-        <Text style={styles.date}>
-          {new Date().toLocaleDateString('vi-VN', {
-            weekday: 'long',
-            day: '2-digit',
-            month: '2-digit',
-          })}
-        </Text>
-
-        {today && (
-          <View style={[styles.badge, STATUS_TONE[today.status] ?? STATUS_TONE.default]}>
-            <Text style={styles.badgeText}>{today.status}</Text>
-          </View>
-        )}
-
-        <View style={styles.times}>
-          <View style={styles.timeBox}>
-            <Text style={styles.timeLabel}>Check-in</Text>
-            <Text style={styles.timeValue}>
-              {today?.checkInAt
-                ? new Date(today.checkInAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-                : '—'}
-            </Text>
-          </View>
-          <View style={styles.timeBox}>
-            <Text style={styles.timeLabel}>Check-out</Text>
-            <Text style={styles.timeValue}>
-              {today?.checkOutAt
-                ? new Date(today.checkOutAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-                : '—'}
-            </Text>
-          </View>
-        </View>
-
-        <Pressable
-          onPress={() => doCheck('in')}
-          disabled={submitting !== null || (checkedIn && !checkedOut)}
-          style={[styles.primaryBtn, (submitting !== null || (checkedIn && !checkedOut)) && styles.btnDisabled]}
-        >
-          <Text style={styles.primaryBtnText}>
-            {submitting === 'in' ? 'Đang check-in…' : checkedIn ? 'Đã check-in' : 'Check-in'}
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => doCheck('out')}
-          disabled={submitting !== null || !checkedIn || checkedOut}
-          style={[styles.secondaryBtn, (submitting !== null || !checkedIn || checkedOut) && styles.btnDisabled]}
-        >
-          <Text style={styles.secondaryBtnText}>
-            {submitting === 'out' ? 'Đang check-out…' : checkedOut ? 'Đã check-out' : 'Check-out'}
-          </Text>
-        </Pressable>
-
-        {message && (
-          <Text style={[styles.msg, message.kind === 'ok' ? styles.msgOk : styles.msgErr]}>
-            {message.text}
-          </Text>
-        )}
-
-        {lastResult && (
-          <View style={styles.resultBox}>
-            <ResultRow label="Validation" value={lastResult.validation_method} />
-            <ResultRow label="Trust" value={`${lastResult.trust_score} (${lastResult.trust_level})`} />
-            {lastResult.risk_flags.length > 0 && (
-              <ResultRow label="Flags" value={lastResult.risk_flags.join(', ')} tone="warn" />
-            )}
-            {lastResult.worked_minutes !== undefined && (
-              <ResultRow label="Worked" value={`${lastResult.worked_minutes} min`} />
-            )}
-            {lastResult.overtime_minutes !== undefined && lastResult.overtime_minutes > 0 && (
-              <ResultRow label="Overtime" value={`${lastResult.overtime_minutes} min`} tone="ot" />
-            )}
-          </View>
-        )}
-      </View>
-
-      <Pressable onPress={() => router.push('/history' as never)} style={styles.linkBtn}>
-        <Text style={styles.linkBtnText}>→ Xem lịch sử</Text>
-      </Pressable>
-    </ScrollView>
-  );
-}
-
-function ResultRow({ label, value, tone }: { label: string; value: string; tone?: 'warn' | 'ot' }) {
-  return (
-    <View style={styles.resultRow}>
-      <Text style={styles.resultLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.resultValue,
-          tone === 'warn' && { color: '#92400e' },
-          tone === 'ot' && { color: '#0369a1' },
-        ]}
+        }
       >
-        {value}
-      </Text>
+        <View style={styles.heroCard}>
+          <View style={styles.heroHeader}>
+            <Text style={styles.heroLabel}>Hôm nay</Text>
+            {tone && (
+              <View style={[styles.statusBadge, { backgroundColor: tone.bg }]}>
+                <Text style={[styles.statusBadgeText, { color: tone.fg }]}>{tone.label}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.heroDate}>
+            {new Date().toLocaleDateString('vi-VN', {
+              weekday: 'long',
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            })}
+          </Text>
+
+          <View style={styles.times}>
+            <View style={[styles.timeBox, { backgroundColor: colors.emerald100 }]}>
+              <Text style={[styles.timeLabel, { color: colors.emerald700 }]}>Check-in</Text>
+              <Text style={styles.timeValue}>
+                {today?.checkInAt
+                  ? new Date(today.checkInAt).toLocaleTimeString('vi-VN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : '—'}
+              </Text>
+            </View>
+            <View style={[styles.timeBox, { backgroundColor: colors.brand50 }]}>
+              <View style={styles.liveRow}>
+                <Text style={[styles.timeLabel, { color: colors.brand700 }]}>Check-out</Text>
+                {!checkedOut && (
+                  <View style={styles.liveDot}>
+                    <View style={styles.liveDotPulse} />
+                    <Text style={styles.liveText}>live</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.timeValue}>
+                {checkedOut
+                  ? new Date(today!.checkOutAt!).toLocaleTimeString('vi-VN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : now.toLocaleTimeString('vi-VN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
+              </Text>
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => doCheck('in')}
+            disabled={submitting !== null || checkedIn}
+            style={[styles.primaryBtn, (submitting !== null || checkedIn) && styles.btnDisabled]}
+          >
+            <Text style={styles.primaryBtnText}>
+              {submitting === 'in' ? 'Đang check-in…' : checkedIn ? '✓ Đã check-in' : '→ Check-in'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => doCheck('out')}
+            disabled={submitting !== null || !checkedIn}
+            style={[styles.secondaryBtn, (submitting !== null || !checkedIn) && styles.btnDisabled]}
+          >
+            <Text style={styles.secondaryBtnText}>
+              {submitting === 'out'
+                ? 'Đang check-out…'
+                : checkedOut
+                  ? '↻ Cập nhật check-out'
+                  : '← Check-out'}
+            </Text>
+          </Pressable>
+
+          {message && (
+            <View
+              style={[
+                styles.msg,
+                { backgroundColor: message.kind === 'ok' ? colors.emerald100 : colors.rose100 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.msgText,
+                  { color: message.kind === 'ok' ? colors.emerald700 : colors.rose700 },
+                ]}
+              >
+                {message.text}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <Pressable onPress={() => router.push('/history' as never)} style={styles.historyLink}>
+          <Text style={styles.historyLinkText}>📅 Xem lịch sử 14 ngày</Text>
+          <Text style={styles.historyArrow}>→</Text>
+        </Pressable>
+      </ScrollView>
     </View>
   );
 }
 
-const STATUS_TONE: Record<string, { backgroundColor: string }> & { default: { backgroundColor: string } } = {
-  on_time: { backgroundColor: '#dcfce7' },
-  late: { backgroundColor: '#fef3c7' },
-  overtime: { backgroundColor: '#e0f2fe' },
-  early_leave: { backgroundColor: '#fee2e2' },
-  absent: { backgroundColor: '#fee2e2' },
-  missing_checkout: { backgroundColor: '#fef3c7' },
-  default: { backgroundColor: '#e2e8f0' },
-};
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: {
+  container: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  scroll: { padding: 16, paddingBottom: 40 },
+  heroCard: {
+    backgroundColor: colors.surface,
+    padding: 20,
+    borderRadius: radius.xl,
+    ...shadow.card,
+  },
+  heroHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    color: colors.slate500,
+  },
+  heroDate: { marginTop: 6, fontSize: 20, fontWeight: '700', color: colors.slate900 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.full },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' },
+  times: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  timeBox: { flex: 1, padding: 14, borderRadius: radius.md },
+  timeLabel: { fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  timeValue: { fontSize: 20, fontWeight: '700', color: colors.slate900, fontFamily: 'Menlo' },
+  liveRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  liveDot: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  liveDotPulse: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.brand600 },
+  liveText: { fontSize: 9, fontWeight: '700', color: colors.brand600, textTransform: 'uppercase' },
+  primaryBtn: {
+    marginTop: 18,
+    backgroundColor: colors.emerald500,
+    paddingVertical: 16,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  secondaryBtn: {
+    marginTop: 10,
+    borderWidth: 2,
+    borderColor: colors.brand600,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  secondaryBtnText: { color: colors.brand700, fontSize: 16, fontWeight: '700' },
+  btnDisabled: { opacity: 0.4 },
+  msg: { marginTop: 14, padding: 12, borderRadius: radius.md },
+  msgText: { fontSize: 13, fontWeight: '500' },
+  historyLink: {
+    marginTop: 16,
+    backgroundColor: colors.surface,
+    padding: 16,
+    borderRadius: radius.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    paddingTop: 60,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    ...shadow.card,
   },
-  title: { fontSize: 22, fontWeight: '700' },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logo: { width: 72, height: 24 },
-  logout: { color: '#64748b', fontSize: 13 },
-  card: {
-    margin: 16,
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  cardLabel: { fontSize: 11, textTransform: 'uppercase', color: '#64748b', letterSpacing: 1 },
-  date: { fontSize: 18, fontWeight: '600', marginTop: 4 },
-  badge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12, marginTop: 6 },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  times: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  timeBox: {
-    flex: 1,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-  },
-  timeLabel: { fontSize: 11, color: '#64748b' },
-  timeValue: { fontSize: 16, fontFamily: 'Menlo', marginTop: 2 },
-  primaryBtn: {
-    marginTop: 16,
-    backgroundColor: '#0f172a',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  primaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  secondaryBtn: {
-    marginTop: 8,
-    borderWidth: 2,
-    borderColor: '#0f172a',
-    paddingVertical: 13,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  secondaryBtnText: { color: '#0f172a', fontWeight: '600', fontSize: 16 },
-  btnDisabled: { opacity: 0.4 },
-  msg: { marginTop: 12, padding: 10, borderRadius: 6, fontSize: 13 },
-  msgOk: { backgroundColor: '#dcfce7', color: '#166534' },
-  msgErr: { backgroundColor: '#fee2e2', color: '#991b1b' },
-  resultBox: {
-    marginTop: 12,
-    padding: 10,
-    backgroundColor: '#f8fafc',
-    borderRadius: 6,
-  },
-  resultRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  resultLabel: { fontSize: 11, color: '#64748b' },
-  resultValue: { fontSize: 12, fontFamily: 'Menlo', color: '#0f172a' },
-  linkBtn: { marginHorizontal: 16, padding: 14, alignItems: 'center' },
-  linkBtnText: { color: '#0f172a', fontSize: 14, fontWeight: '500' },
+  historyLinkText: { fontSize: 15, fontWeight: '600', color: colors.slate700 },
+  historyArrow: { fontSize: 20, color: colors.brand600 },
 });

@@ -1,29 +1,34 @@
 import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { hasToken } from './_lib/api';
+import { getStoredUser, hasToken, homeFor } from './_lib/api';
+import { colors } from './_lib/theme';
 
 export default function Index() {
   const router = useRouter();
 
   useEffect(() => {
     (async () => {
-      // expo-router generates typed routes via `expo start`; cast until first run.
-      if (await hasToken()) {
-        router.replace('/checkin' as never);
-      } else {
+      if (!(await hasToken())) {
         router.replace('/login' as never);
+        return;
       }
+      const user = await getStoredUser();
+      if (!user) {
+        router.replace('/login' as never);
+        return;
+      }
+      router.replace(homeFor(user) as never);
     })();
   }, [router]);
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator />
+      <ActivityIndicator color={colors.brand600} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' },
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
 });
