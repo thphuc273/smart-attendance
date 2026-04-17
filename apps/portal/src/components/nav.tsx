@@ -9,6 +9,7 @@ const NAV_ITEMS: { href: string; label: string; role?: 'admin' | 'manager' | 'em
   { href: '/checkin', label: 'Check-in', role: 'employee' },
   { href: '/dashboard', label: 'Dashboard', role: 'manager' },
   { href: '/sessions', label: 'Sessions', role: 'manager' },
+  { href: '/employees', label: 'Employees', role: 'manager' },
   { href: '/reports', label: 'Reports', role: 'manager' },
   { href: '/branches', label: 'Branches', role: 'admin' },
 ];
