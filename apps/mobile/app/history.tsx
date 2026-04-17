@@ -9,8 +9,8 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getApi, getStoredUser, hasToken, type StoredUser } from './_lib/api';
-import { colors, radius, shadow, statusTone } from './_lib/theme';
+import { getApi, getStoredUser, hasToken, type StoredUser } from '../lib/api';
+import { colors, radius, shadow, statusTone } from '../lib/theme';
 
 interface Session {
   id: string;

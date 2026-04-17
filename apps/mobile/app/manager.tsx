@@ -9,10 +9,10 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getApi, getStoredUser, hasToken, type StoredUser } from './_lib/api';
-import { colors, radius, shadow } from './_lib/theme';
-import { Header } from './_components/Header';
-import { StatCard } from './_components/StatCard';
+import { getApi, getStoredUser, hasToken, type StoredUser } from '../lib/api';
+import { colors, radius, shadow } from '../lib/theme';
+import { Header } from '../components/Header';
+import { StatCard } from '../components/StatCard';
 
 interface Branch {
   id: string;

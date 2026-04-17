@@ -183,52 +183,13 @@ export default function DashboardPage() {
         )}
 
         {admin && overview && (
-          <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <section className="mt-6">
             <div className="card">
               <h3 className="text-sm font-semibold text-slate-900">Trạng thái hôm nay</h3>
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
                 <StatusRow label="Đúng giờ" count={overview.today.on_time} tone="emerald" />
                 <StatusRow label="Đi muộn" count={overview.today.late} tone="amber" />
                 <StatusRow label="Vắng" count={overview.today.absent} tone="rose" />
-              </div>
-            </div>
-
-            <div className="card">
-              <h3 className="text-sm font-semibold text-slate-900">Top đúng giờ 🏆</h3>
-              <div className="mt-4 space-y-2">
-                {overview.top_branches_on_time.length === 0 ? (
-                  <p className="text-xs text-slate-400">Chưa có dữ liệu hôm nay</p>
-                ) : (
-                  overview.top_branches_on_time.map((b, i) => (
-                    <div key={b.branch_id} className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 text-sm text-slate-700">
-                        <span className="text-xs font-semibold text-slate-400">#{i + 1}</span>
-                        {b.name}
-                      </span>
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                        {(b.rate * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="card">
-              <h3 className="text-sm font-semibold text-slate-900">Top đi muộn</h3>
-              <div className="mt-4 space-y-2">
-                {overview.top_branches_late.length === 0 ? (
-                  <p className="text-xs text-slate-400">Không có branch đi muộn 🎉</p>
-                ) : (
-                  overview.top_branches_late.map((b) => (
-                    <div key={b.branch_id} className="flex items-center justify-between">
-                      <span className="text-sm text-slate-700">{b.name}</span>
-                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                        {b.late_count}
-                      </span>
-                    </div>
-                  ))
-                )}
               </div>
             </div>
           </section>

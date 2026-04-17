@@ -6,8 +6,8 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import ky from 'ky';
-import { homeFor, storeUser } from './_lib/api';
-import { colors, radius, shadow } from './_lib/theme';
+import { homeFor, storeUser } from '../lib/api';
+import { colors, radius, shadow } from '../lib/theme';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
 

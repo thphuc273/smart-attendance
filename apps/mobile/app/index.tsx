@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getStoredUser, hasToken, homeFor } from './_lib/api';
-import { colors } from './_lib/theme';
+import { getStoredUser, hasToken, homeFor } from '../lib/api';
+import { colors } from '../lib/theme';
 
 export default function Index() {
   const router = useRouter();

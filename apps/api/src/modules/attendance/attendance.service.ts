@@ -480,19 +480,21 @@ export class AttendanceService {
       resolvedLateMinutes = classification.lateMinutes;
     }
 
-    // 9. Update session + create event
+    // 9. Update session (only if valid) + always create event
     const result = await this.prisma.$transaction(async (tx) => {
-      const updatedSession = await tx.attendanceSession.update({
-        where: { id: session.id },
-        data: {
-          checkOutAt,
-          workedMinutes,
-          overtimeMinutes,
-          lateMinutes: resolvedLateMinutes,
-          status,
-          trustScore: Math.min(session.trustScore ?? 100, trustResult.score),
-        },
-      });
+      const updatedSession = validationPassed
+        ? await tx.attendanceSession.update({
+            where: { id: session.id },
+            data: {
+              checkOutAt,
+              workedMinutes,
+              overtimeMinutes,
+              lateMinutes: resolvedLateMinutes,
+              status,
+              trustScore: Math.min(session.trustScore ?? 100, trustResult.score),
+            },
+          })
+        : session;
 
       const event = await tx.attendanceEvent.create({
         data: {
@@ -521,6 +523,38 @@ export class AttendanceService {
 
       return { session: updatedSession, event };
     });
+
+    if (!validationPassed) {
+      const closest = branch
+        ? Math.min(
+            ...[
+              { centerLat: Number(branch.latitude), centerLng: Number(branch.longitude), radiusMeters: branch.radiusMeters },
+              ...branch.geofences.map((g) => ({
+                centerLat: Number(g.centerLat),
+                centerLng: Number(g.centerLng),
+                radiusMeters: g.radiusMeters,
+              })),
+            ].map((g) => distanceToGeofence(point, g)),
+          )
+        : Number.POSITIVE_INFINITY;
+      const distanceValue = Number.isFinite(closest) ? Math.round(closest) : null;
+      throw new UnprocessableEntityException({
+        code: 'INVALID_LOCATION',
+        message: 'Check-out bị từ chối: vị trí ngoài geofence và WiFi không khớp',
+        details: {
+          event_id: result.event.id,
+          trust_score: trustResult.score,
+          risk_flags: trustResult.flags,
+          distance_meters: distanceValue,
+          user_location: { latitude: dto.latitude, longitude: dto.longitude },
+          branch: branch ? { id: branch.id, name: branch.name, radius_meters: branch.radiusMeters } : null,
+          hint:
+            distanceValue !== null
+              ? `Bạn đang cách branch ${distanceValue}m (radius ${branch?.radiusMeters}m). Quay lại trong vùng branch để check-out.`
+              : 'Không xác định được khoảng cách.',
+        },
+      });
+    }
 
     return {
       session_id: result.session.id,

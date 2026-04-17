@@ -12,10 +12,10 @@ import {
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
-import { getApi, getStoredUser, hasToken, type StoredUser } from './_lib/api';
-import { getDeviceFingerprint, getDeviceName, getPlatform } from './_lib/device';
-import { colors, radius, shadow, statusTone } from './_lib/theme';
-import { Header } from './_components/Header';
+import { getApi, getStoredUser, hasToken, type StoredUser } from '../lib/api';
+import { getDeviceFingerprint, getDeviceName, getPlatform } from '../lib/device';
+import { colors, radius, shadow, statusTone } from '../lib/theme';
+import { Header } from '../components/Header';
 
 interface Session {
   id: string;

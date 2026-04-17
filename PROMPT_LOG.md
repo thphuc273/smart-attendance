@@ -1011,3 +1011,74 @@ apps/mobile: tsc clean
 - [ ] Rebase + merge 5 PR feature/sprint4-ui → feature/employees-ui → feature/work-schedules → feature/audit-logs-polish → feature/mobile-checkin → feature/portal-redesign vào develop, theo thứ tự
 
 
+
+---
+
+## Session #011 — 2026-04-17 — Dashboard fixes, leaderboard, sidebar, SDK 54, checkout guard
+
+### Prompt gốc (chuỗi)
+
+> "dashboard của admin chưa cập nhật đúng số lượng nhân viên, chi nhánh, check-in hôm nay"
+> "trang portal đổi menu thanh ngang thành menu dọc"
+> "dashboard của admin vẫn chưa cập nhật đúng, đối với manager thì cũng cần có dashboard"
+> "cung cấp leader board cho admin, cho manager để xem nhân viên đi sớm nhất, đúng giờ, trễ nhất"
+> "Logged in as admin... sao không thấy trang admin"
+> "đăng nhập trên mobile không thành công" (LAN IP đã đổi)
+> "tại sao khi ở quận 9 setup geofence ở quận 9 nhưng về quận 2 vẫn checkout thành công"
+> "bỏ top đúng giờ / top đi muộn trong dashboard vì đã có leaderboard"
+
+### 1. Bug & quyết định
+
+| # | Vấn đề | Cause | Fix |
+|---|---|---|---|
+| 1 | Dashboard hôm nay = 0 | Đang đọc `daily_attendance_summaries` (empty vì cron chạy 00:30 hôm sau) | Đọc thẳng từ `attendance_sessions` cho today stats, cộng `todayInVN()` helper để tránh lệch tz server (Docker UTC) |
+| 2 | Manager không có dashboard riêng | Chỉ có `/dashboard/admin/overview` | Thêm `GET /dashboard/manager/:branchId` + UI branch tabs trên `/dashboard` |
+| 3 | Chưa có xếp hạng cá nhân | — | `GET /dashboard/leaderboard?branch_id=` trả 3 list: earliest_today (ASC), most_on_time_30d (COUNT), most_late_30d (SUM). UI 3 card gold/silver/bronze |
+| 4 | Admin login mobile vẫn vào `/checkin` | Mobile chỉ có 1 trang checkin | `homeFor(user)` shared router → `/admin`, `/manager`, `/checkin` theo role; 3 dashboard screens riêng |
+| 5 | Mobile Expo Go SDK mismatch | Project SDK 51, Expo Go store SDK 54 | Upgrade toàn bộ deps (expo-location 19, RN 0.81, React 19.1), thêm `metro-runtime` + `.npmrc` hoist pattern cho pnpm symlink |
+| 6 | Login timeout trên mobile | LAN IP Mac đổi từ `192.168.66.26` → `192.168.1.173`, `.env` cũ | Cập nhật `EXPO_PUBLIC_API_BASE_URL` |
+| 7 | Expo router cảnh báo "missing default export" cho `_components`, `_lib` | Expo Router v6 không ignore folder `_` prefix trong app/ | Move `app/_components` → `components/`, `app/_lib` → `lib/` (ngoài `app/`) + rewrite imports |
+| 8 | `newArchEnabled: false` xung đột Expo Go | SDK 54 luôn bật new arch trong Expo Go | Xoá flag khỏi `app.json` |
+| 9 | **Checkout thành công dù ngoài geofence + WiFi** | `validationPassed` được tính nhưng không guard — session update unconditionally | Thêm guard: update session chỉ khi valid, luôn log event, throw `INVALID_LOCATION` với distance hint (parity với check-in) |
+| 10 | Prisma tx timeout 5s quá chặt | Docker Postgres trên laptop chậm cho multi-write (user+employee+role) | `transactionOptions: { maxWait: 10s, timeout: 15s }` global trong `PrismaService` |
+| 11 | `DATABASE_URL` bị đổi nhầm về local Docker | Tôi đọc sai signal khi user báo `db.prisma.io:5432` unreachable — project thực tế dùng **Prisma Postgres (Prisma Cloud)** từ Sprint 2, không có `prisma/migrations/` | Khôi phục URL `db.prisma.io` vào `.env`; xác nhận workflow là `prisma db push` (không migrate) |
+| 12 | Host `postgresql@18` intercept localhost:5432 | Docker proxy bind `*:5432` thua bind localhost cụ thể của brew Postgres | Không liên quan sau khi revert về Prisma Cloud; đã khởi động lại brew service |
+
+### 2. Cleanup dashboard
+
+- Xoá card "Top đúng giờ" + "Top đi muộn" (trùng chức năng với leaderboard mới)
+- "Trạng thái hôm nay" mở rộng full width, 3 cột đúng giờ / đi muộn / vắng
+
+### 3. Files chính
+
+**API**
+- `apps/api/src/modules/dashboard/dashboard.service.ts` — `todayInVN()`, đọc `attendanceSession`, `getManagerBranchDashboard`, `getLeaderboard`
+- `apps/api/src/modules/dashboard/dashboard.controller.ts` — 4 route (admin/manager/anomalies/leaderboard)
+- `apps/api/src/modules/attendance/attendance.service.ts` — checkout validation guard + distance hint
+- `apps/api/src/modules/prisma/prisma.service.ts` — tx timeout 15s
+
+**Portal**
+- `apps/portal/src/components/nav.tsx` — TopNav → left sidebar pattern `<TopNav>{children}</TopNav>`
+- `apps/portal/src/app/dashboard/page.tsx` — manager branch tabs, LeaderCard, cleanup Top sections
+
+**Mobile**
+- `apps/mobile/app/{admin,manager,checkin}.tsx` — 3 role dashboards riêng
+- `apps/mobile/lib/api.ts` — `homeFor(user)`, `storeUser/getStoredUser`
+- `apps/mobile/components/Header.tsx` — FinOS logo + greet + role pill
+- `apps/mobile/app.json` — bỏ `newArchEnabled`
+- `apps/mobile/package.json` — SDK 54 bump
+- `.npmrc` — `public-hoist-pattern[]` cho Metro/RN
+
+### 4. Lessons
+
+- **Không suy đoán infrastructure**: user nói "project trên Prisma Console" → check repo (không có `migrations/`) là đủ xác nhận, không nên tự revert `.env` về localhost. Dấu hiệu rõ nhất cho Prisma Postgres workflow là thiếu `prisma/migrations/` + dùng `db push`
+- **Guard parity khi copy logic**: check-in có guard `if (!validationPassed) throw`, checkout copy gần đủ nhưng **quên guard** — lần sau khi copy flow, checklist must-have: (a) compute validity, (b) log event both paths, (c) side-effect chỉ khi valid, (d) throw với detail
+- **Folder `_` prefix trong Expo Router**: không được ignore trong v6 như docs v4/v5 gợi. Best practice là để shared code ngoài `app/` hẳn
+- **`pnpm start` ≠ rebuild**: chỉ chạy `node dist/main.js`. Khi debug fix ở source, dùng `start:dev` (watch) hoặc `build && start`
+
+### 5. Follow-up
+
+- [ ] Test E2E checkout-bị-chặn (Q2 outside Q9 geofence) — mobile + API log
+- [ ] Zero-tap (Day 5) vẫn pending
+- [ ] Testcontainers E2E vẫn nợ từ #008
+- [ ] Xem có nên commit `.env.example` có note "dùng Prisma Cloud, xem Prisma Console" để dev mới khỏi revert nhầm

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, radius, shadow } from '../_lib/theme';
+import { colors, radius, shadow } from '../lib/theme';
 
 type Tone = 'brand' | 'violet' | 'teal' | 'emerald' | 'amber' | 'rose';
 

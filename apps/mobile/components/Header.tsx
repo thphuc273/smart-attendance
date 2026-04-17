@@ -1,7 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { clearAuth, type StoredUser } from '../_lib/api';
-import { colors, radius, shadow } from '../_lib/theme';
+import { clearAuth, type StoredUser } from '../lib/api';
+import { colors, radius, shadow } from '../lib/theme';
 
 export function Header({ title, user }: { title: string; user: StoredUser | null }) {
   const router = useRouter();
@@ -21,7 +21,7 @@ export function Header({ title, user }: { title: string; user: StoredUser | null
     <View style={styles.wrap}>
       <View style={styles.topRow}>
         <Image
-          source={require('../../assets/finos-logo.png')}
+          source={require('../assets/finos-logo.png')}
           style={styles.logo}
           resizeMode="contain"
         />

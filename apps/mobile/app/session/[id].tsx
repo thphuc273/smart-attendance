@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getApi, hasToken } from '../_lib/api';
+import { getApi, hasToken } from '../../lib/api';
 
 interface Event {
   id: string;
