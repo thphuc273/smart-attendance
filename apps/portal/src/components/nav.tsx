@@ -11,6 +11,7 @@ const NAV_ITEMS: { href: string; label: string; role?: 'admin' | 'manager' | 'em
   { href: '/sessions', label: 'Sessions', role: 'manager' },
   { href: '/employees', label: 'Employees', role: 'manager' },
   { href: '/reports', label: 'Reports', role: 'manager' },
+  { href: '/schedules', label: 'Schedules', role: 'admin' },
   { href: '/branches', label: 'Branches', role: 'admin' },
 ];
 
