@@ -56,9 +56,7 @@ export default function SessionsPage() {
   if (!user) return null;
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-6xl p-6">
+    <TopNav><main className="mx-auto max-w-6xl p-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Sessions</h1>
         <p className="mt-1 text-sm text-slate-600">
           Lịch sử chấm công — admin/manager có thể override status.
@@ -193,7 +191,7 @@ export default function SessionsPage() {
           onSuccess={() => setOverrideOf(null)}
         />
       )}
-    </>
+    </TopNav>
   );
 }
 

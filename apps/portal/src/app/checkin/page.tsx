@@ -177,9 +177,7 @@ export default function CheckinPage() {
   const checkedOut = !!today?.checkOutAt;
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-3xl p-6">
+    <TopNav><main className="mx-auto max-w-3xl p-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Chấm công</h1>
         <p className="mt-1 text-sm text-slate-500">
           Xin chào {user.full_name ?? user.email} 👋 Trình duyệt sẽ hỏi quyền Vị trí khi bạn bấm.
@@ -361,7 +359,7 @@ export default function CheckinPage() {
           </div>
         </section>
       </main>
-    </>
+    </TopNav>
   );
 }
 

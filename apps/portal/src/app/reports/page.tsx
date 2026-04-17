@@ -72,9 +72,7 @@ export default function ReportsPage() {
   const branchName = (id: string) => branches.find((b) => b.id === id)?.name ?? id.slice(0, 8);
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-6xl p-6">
+    <TopNav><main className="mx-auto max-w-6xl p-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Reports</h1>
         <p className="mt-1 text-sm text-slate-600">Daily summary theo branch + CSV export.</p>
 
@@ -181,7 +179,7 @@ export default function ReportsPage() {
           <ExportPanel filters={filters} />
         </section>
       </main>
-    </>
+    </TopNav>
   );
 }
 

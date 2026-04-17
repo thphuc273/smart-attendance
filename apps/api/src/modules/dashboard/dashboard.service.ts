@@ -3,20 +3,30 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
 
+/** UTC-midnight Date that represents today in VN calendar (UTC+7). */
+function todayInVN(): Date {
+  const nowMs = Date.now() + 7 * 3600 * 1000;
+  const vn = new Date(nowMs);
+  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate()));
+}
+
 @Injectable()
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getAdminOverview() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // VN calendar day — independent of server TZ. daily_attendance_summaries
+    // is populated by cron 00:30 so it's empty on fresh DB / before cron runs.
+    // Source of truth for TODAY = attendanceSession directly; summary is for
+    // historical dashboards only.
+    const today = todayInVN();
     const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
-    const [totalActiveEmployees, totalActiveBranches, todaySummaries, heatmapRows] = await Promise.all([
+    const [totalActiveEmployees, totalActiveBranches, todaySessions, heatmapRows] = await Promise.all([
       this.prisma.employee.count({ where: { employmentStatus: 'active' } }),
       this.prisma.branch.count({ where: { status: 'active' } }),
-      this.prisma.dailyAttendanceSummary.findMany({
+      this.prisma.attendanceSession.findMany({
         where: { workDate: today },
         include: { branch: { select: { id: true, name: true } } },
       }),
@@ -34,19 +44,18 @@ export class DashboardService {
       `,
     ]);
 
-    // Aggregate today
+    // Aggregate today — checkedIn = has non-null checkInAt
     let checkedIn = 0;
     let onTime = 0;
     let late = 0;
     let absent = 0;
 
-    // Branches stats
     const branchStats: Record<string, { id: string; name: string; total: number; onTime: number; late: number }> = {};
 
-    todaySummaries.forEach((s) => {
-      checkedIn++;
+    todaySessions.forEach((s) => {
+      if (s.checkInAt) checkedIn++;
       if (s.status === 'on_time') onTime++;
-      else if (s.status === 'late') late++;
+      else if (s.status === 'late' || s.status === 'overtime' || s.status === 'early_leave' || s.status === 'missing_checkout') late++;
       else if (s.status === 'absent') absent++;
 
       if (!branchStats[s.branchId]) {
@@ -104,15 +113,11 @@ export class DashboardService {
     });
     if (!branch) throw new NotFoundException('Branch not found');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = todayInVN();
+    const weekAgo = new Date(today);
+    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
-    // 7 days ago
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    weekAgo.setHours(0, 0, 0, 0);
-
-    const [branchEmployees, todaySessions, lowTrustToday, weekSummaries] = await Promise.all([
+    const [branchEmployees, todaySessions, lowTrustToday, weekSessions] = await Promise.all([
       this.prisma.employee.count({
         where: { primaryBranchId: branchId, employmentStatus: 'active' },
       }),
@@ -133,7 +138,8 @@ export class DashboardService {
           },
         },
       }),
-      this.prisma.dailyAttendanceSummary.findMany({
+      // Read from sessions directly — works before cron populates summaries
+      this.prisma.attendanceSession.findMany({
         where: {
           branchId,
           workDate: { gte: weekAgo, lt: today },
@@ -142,19 +148,20 @@ export class DashboardService {
       }),
     ]);
 
-    // Aggregate today
+    // Aggregate today — checkedIn requires non-null checkInAt
     let checkedIn = 0;
     let onTime = 0;
     let late = 0;
     let absentCount = 0;
-    let notYet = branchEmployees - todaySessions.length;
 
     todaySessions.forEach((s) => {
-      checkedIn++;
+      if (s.checkInAt) checkedIn++;
       if (s.status === 'on_time') onTime++;
       else if (s.status === 'late') late++;
       else if (s.status === 'absent') absentCount++;
     });
+
+    const notYet = Math.max(0, branchEmployees - checkedIn - absentCount);
 
     // Low trust mapping
     const lowTrustMap = lowTrustToday.map((s) => {
@@ -177,15 +184,15 @@ export class DashboardService {
       };
     });
 
-    // Week trend
+    // Week trend — bucket by VN calendar day
     const trendMap: Record<string, { total: number; onTime: number }> = {};
     for (let d = 1; d <= 7; d++) {
       const date = new Date(today);
-      date.setDate(date.getDate() - d);
+      date.setUTCDate(date.getUTCDate() - d);
       trendMap[date.toISOString().split('T')[0]] = { total: 0, onTime: 0 };
     }
 
-    weekSummaries.forEach((s) => {
+    weekSessions.forEach((s) => {
       const dateStr = s.workDate.toISOString().split('T')[0];
       if (trendMap[dateStr]) {
         trendMap[dateStr].total++;
@@ -215,13 +222,169 @@ export class DashboardService {
     };
   }
 
+  /**
+   * Leaderboard — 3 rankings for admin/manager review:
+   * - Đi sớm nhất hôm nay (earliest check-in today)
+   * - Đúng giờ nhất 30 ngày (most on_time sessions over last 30 days)
+   * - Trễ nhiều nhất 30 ngày (highest total late_minutes over last 30 days)
+   *
+   * Admin: all branches unless branchIdFilter given.
+   * Manager: only their managed branches; branchIdFilter must be in scope.
+   */
+  async getLeaderboard(
+    userId: string,
+    isSuperAdmin: boolean,
+    branchIdFilter: string | null,
+  ) {
+    const today = todayInVN();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+
+    // Resolve branch scope for non-admin
+    let scopedBranchIds: string[] | null = null;
+    if (!isSuperAdmin) {
+      const managed = await this.prisma.managerBranch.findMany({
+        where: { userId },
+        select: { branchId: true },
+      });
+      scopedBranchIds = managed.map((m) => m.branchId);
+      if (scopedBranchIds.length === 0) {
+        return { earliest_today: [], most_on_time_30d: [], most_late_30d: [] };
+      }
+      if (branchIdFilter && !scopedBranchIds.includes(branchIdFilter)) {
+        return { earliest_today: [], most_on_time_30d: [], most_late_30d: [] };
+      }
+    }
+
+    const branchWhere = branchIdFilter
+      ? { branchId: branchIdFilter }
+      : scopedBranchIds
+        ? { branchId: { in: scopedBranchIds } }
+        : {};
+
+    // 1. Earliest check-in today (top 10 ASC)
+    const earliestRows = await this.prisma.attendanceSession.findMany({
+      where: {
+        workDate: today,
+        checkInAt: { not: null },
+        ...branchWhere,
+      },
+      orderBy: { checkInAt: 'asc' },
+      take: 10,
+      include: {
+        employee: {
+          select: { id: true, employeeCode: true, user: { select: { fullName: true } } },
+        },
+        branch: { select: { id: true, name: true } },
+      },
+    });
+
+    const earliestToday = earliestRows.map((s) => ({
+      employee_id: s.employee.id,
+      employee_code: s.employee.employeeCode,
+      full_name: s.employee.user.fullName,
+      branch: s.branch,
+      check_in_at: s.checkInAt,
+      late_minutes: s.lateMinutes ?? 0,
+      status: s.status,
+    }));
+
+    // 2. Most on-time (30 days)
+    const onTimeRows = await this.prisma.attendanceSession.groupBy({
+      by: ['employeeId'],
+      where: {
+        status: 'on_time',
+        workDate: { gte: thirtyDaysAgo, lt: today },
+        ...branchWhere,
+      },
+      _count: { _all: true },
+      orderBy: { _count: { employeeId: 'desc' } },
+      take: 10,
+    });
+
+    const onTimeEmployees = onTimeRows.length
+      ? await this.prisma.employee.findMany({
+          where: { id: { in: onTimeRows.map((r) => r.employeeId) } },
+          select: {
+            id: true,
+            employeeCode: true,
+            user: { select: { fullName: true } },
+            primaryBranch: { select: { id: true, name: true } },
+          },
+        })
+      : [];
+
+    const onTimeMap = new Map(onTimeEmployees.map((e) => [e.id, e]));
+    const mostOnTime = onTimeRows
+      .map((r) => {
+        const e = onTimeMap.get(r.employeeId);
+        if (!e) return null;
+        return {
+          employee_id: e.id,
+          employee_code: e.employeeCode,
+          full_name: e.user.fullName,
+          branch: e.primaryBranch,
+          on_time_days: r._count._all,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    // 3. Most late total minutes (30 days)
+    const lateRows = await this.prisma.attendanceSession.groupBy({
+      by: ['employeeId'],
+      where: {
+        status: 'late',
+        workDate: { gte: thirtyDaysAgo, lt: today },
+        lateMinutes: { gt: 0 },
+        ...branchWhere,
+      },
+      _sum: { lateMinutes: true },
+      _count: { _all: true },
+      orderBy: { _sum: { lateMinutes: 'desc' } },
+      take: 10,
+    });
+
+    const lateEmployees = lateRows.length
+      ? await this.prisma.employee.findMany({
+          where: { id: { in: lateRows.map((r) => r.employeeId) } },
+          select: {
+            id: true,
+            employeeCode: true,
+            user: { select: { fullName: true } },
+            primaryBranch: { select: { id: true, name: true } },
+          },
+        })
+      : [];
+
+    const lateMap = new Map(lateEmployees.map((e) => [e.id, e]));
+    const mostLate = lateRows
+      .map((r) => {
+        const e = lateMap.get(r.employeeId);
+        if (!e) return null;
+        return {
+          employee_id: e.id,
+          employee_code: e.employeeCode,
+          full_name: e.user.fullName,
+          branch: e.primaryBranch,
+          late_days: r._count._all,
+          total_late_minutes: r._sum.lateMinutes ?? 0,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    return {
+      earliest_today: earliestToday,
+      most_on_time_30d: mostOnTime,
+      most_late_30d: mostLate,
+    };
+  }
+
   async getAnomalies(managerUserId: string, isSuperAdmin: boolean) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = todayInVN();
     const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
+    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
     let scopedBranchIds: string[] | null = null;
     if (!isSuperAdmin) {

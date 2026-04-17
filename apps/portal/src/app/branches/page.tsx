@@ -55,9 +55,7 @@ export default function BranchesPage() {
   if (!user) return null;
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-6xl p-6">
+    <TopNav><main className="mx-auto max-w-6xl p-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Branches</h1>
@@ -187,7 +185,7 @@ export default function BranchesPage() {
           }}
         />
       )}
-    </>
+    </TopNav>
   );
 }
 
