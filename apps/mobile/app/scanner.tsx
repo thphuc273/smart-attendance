@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 // NOTE: Require "expo-camera" installed
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView as CameraViewBase, useCameraPermissions } from 'expo-camera';
+const CameraView = CameraViewBase as unknown as React.ComponentType<any>;
 import * as Location from 'expo-location';
 import { getApi } from '../lib/api';
 import { getDeviceFingerprint } from '../lib/device';
