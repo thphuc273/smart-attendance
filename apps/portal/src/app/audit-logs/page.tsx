@@ -54,9 +54,7 @@ export default function AuditLogsPage() {
   if (!user) return null;
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-6xl p-6">
+    <TopNav><main className="mx-auto max-w-6xl p-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Audit logs</h1>
         <p className="mt-1 text-sm text-slate-600">
           Compliance trail — mọi thay đổi override session, login/logout, create/delete entity.
@@ -206,7 +204,7 @@ export default function AuditLogsPage() {
           </div>
         </div>
       </main>
-    </>
+    </TopNav>
   );
 }
 

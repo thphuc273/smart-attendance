@@ -44,9 +44,7 @@ export default function SchedulesPage() {
   if (!user) return null;
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-5xl p-6">
+    <TopNav><main className="mx-auto max-w-5xl p-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Work schedules</h1>
@@ -134,7 +132,7 @@ export default function SchedulesPage() {
           onMutate={load}
         />
       )}
-    </>
+    </TopNav>
   );
 }
 

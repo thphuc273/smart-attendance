@@ -50,9 +50,7 @@ export default function DashboardPage() {
   if (!user) return null;
 
   return (
-    <>
-      <TopNav />
-      <main className="mx-auto max-w-6xl p-6">
+    <TopNav><main className="mx-auto max-w-6xl p-6">
         <div className="mb-6">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
             Xin chào, {user.full_name?.split(' ').slice(-1)[0] ?? 'bạn'} 👋
@@ -223,7 +221,7 @@ export default function DashboardPage() {
           )}
         </section>
       </main>
-    </>
+    </TopNav>
   );
 }
 
