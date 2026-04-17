@@ -370,6 +370,15 @@ export default function CheckinPage() {
   );
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  on_time: 'Đúng giờ',
+  late: 'Đi muộn',
+  overtime: 'Làm thêm giờ',
+  early_leave: 'Về sớm',
+  absent: 'Vắng',
+  missing_checkout: 'Chưa check-out',
+};
+
 function StatusPill({ status }: { status: string }) {
   const TONE: Record<string, string> = {
     on_time: 'bg-emerald-100 text-emerald-700',
@@ -380,7 +389,7 @@ function StatusPill({ status }: { status: string }) {
     missing_checkout: 'bg-amber-100 text-amber-700',
   };
   const cls = TONE[status] ?? 'bg-slate-100 text-slate-600';
-  return <span className={`badge ${cls}`}>{status}</span>;
+  return <span className={`badge ${cls}`}>{STATUS_LABEL[status] ?? status}</span>;
 }
 
 function HistorySummary({ history }: { history: Session[] }) {

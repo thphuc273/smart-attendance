@@ -95,7 +95,7 @@ export default function SessionsPage() {
               <option value="">(tất cả)</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {STATUS_LABEL[s] ?? s}
                 </option>
               ))}
             </select>
@@ -214,18 +214,33 @@ export default function SessionsPage() {
   );
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  on_time: 'Đúng giờ',
+  late: 'Đi muộn',
+  overtime: 'Làm thêm giờ',
+  early_leave: 'Về sớm',
+  absent: 'Vắng',
+  missing_checkout: 'Chưa check-out',
+};
+
 function StatusBadge({ status }: { status: string }) {
   const tone =
     status === 'on_time'
-      ? 'bg-green-100 text-green-700'
+      ? 'bg-emerald-100 text-emerald-700'
       : status === 'late'
         ? 'bg-amber-100 text-amber-700'
         : status === 'overtime'
           ? 'bg-sky-100 text-sky-700'
-          : status === 'absent' || status === 'missing_checkout'
-            ? 'bg-red-100 text-red-700'
-            : 'bg-slate-100 text-slate-700';
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{status}</span>;
+          : status === 'early_leave'
+            ? 'bg-rose-100 text-rose-700'
+            : status === 'absent' || status === 'missing_checkout'
+              ? 'bg-rose-100 text-rose-700'
+              : 'bg-slate-100 text-slate-700';
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
+      {STATUS_LABEL[status] ?? status}
+    </span>
+  );
 }
 
 function TrustBadge({ score }: { score: number | null }) {
@@ -312,7 +327,7 @@ function OverrideModal({
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {STATUS_LABEL[s] ?? s}
               </option>
             ))}
           </select>
