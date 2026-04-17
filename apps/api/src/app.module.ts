@@ -17,6 +17,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { ZeroTapModule } from './modules/zero-tap/zero-tap.module';
+import { KioskModule } from './modules/kiosk/kiosk.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { ZeroTapModule } from './modules/zero-tap/zero-tap.module';
     WorkSchedulesModule,
     AuditLogsModule,
     ZeroTapModule,
+    KioskModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
