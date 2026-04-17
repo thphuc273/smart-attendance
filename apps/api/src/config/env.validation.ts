@@ -22,6 +22,14 @@ class EnvSchema {
   REDIS_URL?: string;
 
   @IsString()
+  @IsOptional()
+  REDIS_HOST?: string;
+
+  @IsNumber()
+  @IsOptional()
+  REDIS_PORT?: number;
+
+  @IsString()
   JWT_ACCESS_SECRET!: string;
 
   @IsString()

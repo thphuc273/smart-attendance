@@ -402,6 +402,26 @@ model DailyAttendanceSummary {
   @@map("daily_attendance_summaries")
 }
 
+// ============================= REPORT EXPORTS =============================
+
+model ReportExport {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  type         String    // 'attendance_csv'
+  params       Json
+  status       String    @default("queued") // queued | processing | completed | failed
+  fileName     String?   @map("file_name")
+  fileContent  String?   @map("file_content") @db.Text
+  rowCount     Int?      @map("row_count")
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  completedAt  DateTime? @map("completed_at")
+  expiresAt    DateTime? @map("expires_at")
+
+  @@index([userId, createdAt])
+  @@map("report_exports")
+}
+
 // ============================= AUDIT =============================
 
 model AuditLog {

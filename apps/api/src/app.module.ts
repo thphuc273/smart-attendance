@@ -9,6 +9,8 @@ import { BranchesModule } from './modules/branches/branches.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { QueueModule } from './modules/queue/queue.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     EmployeesModule,
     AttendanceModule,
     DashboardModule,
+    QueueModule,
+    ReportsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
