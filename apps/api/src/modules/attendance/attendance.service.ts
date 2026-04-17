@@ -212,10 +212,15 @@ export class AttendanceService {
       include: { events: { where: { eventType: 'check_in', status: 'success' } } },
     });
 
-    if (existingSession && existingSession.events.length > 0) {
+    // Check-in cannot be updated. Either a success event OR a persisted
+    // checkInAt means today is locked for check-in.
+    if (
+      existingSession &&
+      (existingSession.checkInAt !== null || existingSession.events.length > 0)
+    ) {
       throw new ConflictException({
         code: 'ALREADY_CHECKED_IN',
-        message: 'Already checked in today',
+        message: 'Already checked in today — check-in time cannot be updated',
       });
     }
 

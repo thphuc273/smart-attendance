@@ -72,6 +72,12 @@ export default function CheckinPage() {
   const [today, setToday] = useState<Session | null>(null);
   const [history, setHistory] = useState<Session[]>([]);
   const [submitting, setSubmitting] = useState<'in' | 'out' | null>(null);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [lastResult, setLastResult] = useState<CheckInResp['data'] | null>(null);
   const [errorDebug, setErrorDebug] = useState<unknown>(null);
@@ -208,9 +214,19 @@ export default function CheckinPage() {
               </p>
             </div>
             <div className="rounded-xl bg-brand-50/60 p-4">
-              <p className="text-xs font-medium text-brand-700">Check-out</p>
+              <p className="text-xs font-medium text-brand-700">
+                Check-out
+                {!today?.checkOutAt && (
+                  <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-normal text-brand-600/70">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
+                    live
+                  </span>
+                )}
+              </p>
               <p className="mt-1 font-mono text-lg font-semibold text-slate-900">
-                {today?.checkOutAt ? new Date(today.checkOutAt).toLocaleTimeString('vi-VN') : '—'}
+                {today?.checkOutAt
+                  ? new Date(today.checkOutAt).toLocaleTimeString('vi-VN')
+                  : now.toLocaleTimeString('vi-VN')}
               </p>
             </div>
           </div>
