@@ -36,6 +36,12 @@ export class AttendanceController {
     return this.attendance.getMyAttendance(user.id, dto);
   }
 
+  @Get('me/streak')
+  @Roles(RoleCode.employee)
+  getMyStreak(@CurrentUser() user: AuthenticatedUser) {
+    return this.attendance.getMyStreak(user.id);
+  }
+
   @Get('sessions')
   @Roles(RoleCode.manager, RoleCode.admin)
   listSessions(@CurrentUser() user: AuthenticatedUser, @Query() dto: ListSessionsDto) {

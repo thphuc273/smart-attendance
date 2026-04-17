@@ -477,15 +477,48 @@ function StatusRow({
   count: number;
   tone: 'emerald' | 'amber' | 'rose';
 }) {
-  const dotColor =
-    tone === 'emerald' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
+  const styles =
+    tone === 'emerald'
+      ? {
+          bg: 'from-emerald-50 to-emerald-100/60',
+          ring: 'ring-emerald-200',
+          text: 'text-emerald-700',
+          num: 'text-emerald-600',
+          icon: '✓',
+          iconBg: 'bg-emerald-500',
+        }
+      : tone === 'amber'
+        ? {
+            bg: 'from-amber-50 to-amber-100/60',
+            ring: 'ring-amber-200',
+            text: 'text-amber-700',
+            num: 'text-amber-600',
+            icon: '⏱',
+            iconBg: 'bg-amber-500',
+          }
+        : {
+            bg: 'from-rose-50 to-rose-100/60',
+            ring: 'ring-rose-200',
+            text: 'text-rose-700',
+            num: 'text-rose-600',
+            icon: '×',
+            iconBg: 'bg-rose-500',
+          };
   return (
-    <div className="flex items-center justify-between">
-      <span className="flex items-center gap-2 text-sm text-slate-700">
-        <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-        {label}
-      </span>
-      <span className="text-lg font-bold text-slate-900">{count}</span>
+    <div
+      className={`relative flex items-center gap-4 rounded-xl bg-gradient-to-br ${styles.bg} p-4 ring-1 ${styles.ring}`}
+    >
+      <div
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${styles.iconBg} text-lg font-bold text-white shadow-sm`}
+      >
+        {styles.icon}
+      </div>
+      <div className="flex flex-col">
+        <span className={`text-xs font-semibold uppercase tracking-wide ${styles.text}`}>
+          {label}
+        </span>
+        <span className={`text-3xl font-bold leading-none ${styles.num}`}>{count}</span>
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   QUEUE_DAILY_SUMMARY,
   QUEUE_MISSING_CHECKOUT,
   QUEUE_REPORT_EXPORT,
+  QUEUE_ZERO_TAP_REVOKE_CLEANUP,
 } from './queue.constants';
 
 @Global()
@@ -30,6 +31,7 @@ import {
       { name: QUEUE_DAILY_SUMMARY },
       { name: QUEUE_MISSING_CHECKOUT },
       { name: QUEUE_REPORT_EXPORT },
+      { name: QUEUE_ZERO_TAP_REVOKE_CLEANUP },
     ),
   ],
   exports: [BullModule],

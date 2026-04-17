@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
 import { getApi, getStoredUser, hasToken, type StoredUser } from '../lib/api';
@@ -43,6 +43,18 @@ interface CheckResult {
   overtime_minutes?: number;
 }
 
+interface Streak {
+  currentStreak: number;
+  bestStreak: number;
+  onTimeRate30d: number;
+}
+
+interface ZeroTapSetting {
+  id: string;
+  zeroTapEnabled: boolean;
+  zeroTapConsentAt: string | null;
+}
+
 function vnDateString(d: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(d);
 }
@@ -56,6 +68,8 @@ export default function CheckinScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const [streak, setStreak] = useState<Streak | null>(null);
+  const [setting, setSetting] = useState<ZeroTapSetting | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -64,9 +78,23 @@ export default function CheckinScreen() {
 
   const loadToday = useCallback(async () => {
     try {
-      const r = await getApi().get('attendance/me?limit=1').json<{ data: Session[] }>();
+      const api = getApi();
+      const r = await api.get('attendance/me?limit=1').json<{ data: Session[] }>();
       const todayVN = vnDateString(new Date());
       setToday(r.data.find((s) => vnDateString(new Date(s.workDate)) === todayVN) ?? null);
+
+      try {
+        const streakRes = await api.get('attendance/me/streak').json<{ data: Streak }>();
+        setStreak(streakRes.data);
+      } catch(e) {}
+
+      try {
+        const setRes = await api.get('attendance/zero-tap/settings/me').json<{ data: { items: ZeroTapSetting[] } }>();
+        if (setRes.data.items.length > 0) {
+          setSetting(setRes.data.items[0]);
+        }
+      } catch(e) {}
+
     } catch (e) {
       setMessage({ kind: 'err', text: (e as Error).message });
     } finally {
@@ -89,7 +117,13 @@ export default function CheckinScreen() {
       setUser(u);
       await loadToday();
     })();
-  }, [router, loadToday]);
+  }, [router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadToday();
+    }, [loadToday])
+  );
 
   const doCheck = async (kind: 'in' | 'out') => {
     setSubmitting(kind);
@@ -145,6 +179,24 @@ export default function CheckinScreen() {
       setMessage({ kind: 'err', text });
     } finally {
       setSubmitting(null);
+    }
+  };
+
+  const toggleZeroTap = async () => {
+    if (!setting) return;
+    try {
+      setLoading(true);
+      const api = getApi();
+      const newEnabled = !setting.zeroTapEnabled;
+      const res = await api.patch('attendance/zero-tap/settings/me', {
+        json: { device_id: setting.id, enabled: newEnabled, revoke: false }
+      }).json<{ data: ZeroTapSetting }>();
+      setSetting(res.data);
+      Alert.alert('Thành công', newEnabled ? 'Đã bật Zero-Tap' : 'Đã tắt Zero-Tap');
+    } catch(e) {
+      Alert.alert('Lỗi', (e as Error).message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -279,6 +331,36 @@ export default function CheckinScreen() {
           <Text style={styles.historyLinkText}>📅 Xem lịch sử 14 ngày</Text>
           <Text style={styles.historyArrow}>→</Text>
         </Pressable>
+
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+          {streak && (
+            <View style={[styles.heroCard, { flex: 1, padding: 14 }]}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: colors.slate500, textTransform: 'uppercase' }}>🔥 Streak</Text>
+              <Text style={{ fontSize: 24, fontWeight: '800', marginTop: 4 }}>{streak.currentStreak} ngày</Text>
+              <Text style={{ fontSize: 12, color: colors.slate500, marginTop: 2 }}>Best: {streak.bestStreak} • Rate: {streak.onTimeRate30d}%</Text>
+            </View>
+          )}
+          <Pressable
+            onPress={() => router.push('/scanner' as never)}
+            style={[styles.heroCard, { flex: 1, padding: 14, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate900 }]}
+          >
+            <Text style={{ fontSize: 32 }}>📷</Text>
+            <Text style={{ color: 'white', fontWeight: '700', marginTop: 8 }}>Quét QR Kiosk</Text>
+          </Pressable>
+        </View>
+
+        {setting && (
+          <Pressable onPress={toggleZeroTap} style={[styles.historyLink, { marginTop: 16, backgroundColor: setting.zeroTapEnabled ? colors.emerald100 : colors.slate100 }]}>
+            <View>
+              <Text style={[styles.historyLinkText, { color: setting.zeroTapEnabled ? colors.emerald700 : colors.slate700 }]}>
+                {setting.zeroTapEnabled ? '⚡ Zero-tap đang BẬT' : '⚡ Zero-tap đang TẮT'}
+              </Text>
+              <Text style={{ fontSize: 12, color: colors.slate500, marginTop: 2 }}>Thiết bị: {setting.id.split('-')[0]}</Text>
+            </View>
+            <Text style={styles.historyArrow}>{setting.zeroTapEnabled ? 'Bật' : 'Tắt'}</Text>
+          </Pressable>
+        )}
+
       </ScrollView>
     </View>
   );

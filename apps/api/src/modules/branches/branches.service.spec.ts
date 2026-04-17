@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { BranchesService } from './branches.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -40,7 +41,14 @@ describe('BranchesService', () => {
   beforeEach(async () => {
     prisma = makePrismaMock();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [BranchesService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        BranchesService,
+        { provide: PrismaService, useValue: prisma },
+        {
+          provide: CACHE_MANAGER,
+          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
+      ],
     }).compile();
     service = module.get(BranchesService);
   });

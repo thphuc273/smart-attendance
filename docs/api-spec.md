@@ -271,7 +271,12 @@ Scope: manager chỉ tạo được nếu `primary_branch_id` thuộc `managed_b
   "platform": "ios",
   "device_name": "iPhone 14",
   "app_version": "1.0.0",
-  "is_mock_location": false
+  "is_mock_location": false,
+  "wifi_scan": [
+    { "ssid": "Office-5G", "bssid": "aa:bb:cc:dd:ee:ff", "rssi": -45 },
+    { "ssid": "Neighbor",  "bssid": "11:22:33:44:55:66", "rssi": -72 }
+  ],
+  "selfie_base64": "data:image/jpeg;base64,..."  // optional, có → +10 trust
 }
 
 // Response 201 (success)
@@ -496,6 +501,173 @@ Tắt → ghi `zero_tap_revoked_at` + `zero_tap_revoke_reason = user_opt_out`. C
 
 ---
 
+## 5C. Face verification module
+
+### POST `/employees/me/face/enroll`
+**Role:** employee. Lần đầu setup; cho phép re-enroll (ghi audit).
+```json
+// Request
+{
+  "selfies": ["data:image/jpeg;base64,...", "...", "..."]   // 3 ảnh, 3 pose khác nhau
+}
+// Response 201
+{
+  "data": {
+    "employee_id": "uuid",
+    "face_enrolled_at": "2026-04-17T08:00:00Z",
+    "embedding_hash": "sha256:..." // audit reference, KHÔNG trả raw embedding
+  }
+}
+```
+**Errors:**
+- 422 `FACE_NOT_DETECTED` — không phát hiện khuôn mặt trong 1 trong 3 ảnh
+- 422 `FACE_ENROLLMENT_INCONSISTENT` — 3 embedding lệch nhau quá lớn (cosine < 0.7 giữa các cặp)
+
+### POST `/face/verify` (internal)
+Gọi từ `AttendanceService` khi check-in có selfie. Không expose public — wrap trong service layer. Input: `{ employee_id, selfie_base64 }`. Output: `{ match: boolean, similarity: 0-1 }`. Threshold mặc định **0.85**.
+
+---
+
+## 5D. QR Kiosk module
+
+### GET `/kiosk/branches/:id/qr-token`
+**Auth:** Kiosk token (cấp riêng cho mỗi branch, header `X-Kiosk-Token`). Public dashboard không gọi được.
+```json
+{
+  "data": {
+    "branch_id": "uuid",
+    "token": "v1.HMAC_BASE64_URL",
+    "nonce": "01JKQ...",
+    "exp": "2026-04-17T08:00:30Z",
+    "next_rotate_at": "2026-04-17T08:00:25Z"
+  }
+}
+```
+Rotate bucket mỗi 30s. Portal client tự fetch mỗi 25s.
+
+### POST `/attendance/qr-check-in`
+**Role:** employee (mobile scan).
+```json
+// Request
+{
+  "branch_id": "uuid",
+  "token": "v1.HMAC_BASE64_URL",
+  "nonce": "01JKQ...",
+  "latitude": 10.7770,
+  "longitude": 106.7010,
+  "accuracy_meters": 12,
+  "selfie_base64": "data:image/jpeg;base64,...",
+  "device_fingerprint": "ios-abc123",
+  "platform": "ios",
+  "app_version": "1.0.0"
+}
+// Response 201 tương tự /attendance/check-in + trigger = "qr_kiosk"
+```
+**Errors:**
+- 401 `QR_INVALID_SIGNATURE` — HMAC sai
+- 422 `QR_EXPIRED` — token ngoài bucket ±1
+- 409 `QR_ALREADY_USED` — session hôm nay `qr_token_used_at IS NOT NULL`
+- 422 `FACE_MISMATCH` — cosine < 0.85
+- 422 `FACE_NOT_ENROLLED` — employee chưa enroll face
+- 422 `INVALID_LOCATION` — GPS ngoài geofence (QR không fallback WiFi)
+
+### GET|PUT `/branches/:id/qr-secret`
+**Role:** admin. `PUT` rotate HMAC secret (audit log bắt buộc). Response `GET` **không** trả raw secret, chỉ `rotated_at`.
+
+---
+
+## 5E. AI module (Gemini)
+
+### GET `/ai/insights/weekly`
+**Roles:** admin (toàn hệ thống), manager (scope branch). Employee **không được gọi** → 403.
+Query: `?branch_id=uuid&week_start=2026-04-13`
+```json
+{
+  "data": {
+    "scope": "branch",
+    "scope_id": "uuid",
+    "week_start": "2026-04-13",
+    "generated_at": "2026-04-17T08:00:00Z",
+    "cached": true,
+    "positives": [
+      "Tỷ lệ đúng giờ tuần này đạt 96%, tăng 3% so với tuần trước",
+      "Không có sự cố trust score thấp nào nghiêm trọng"
+    ],
+    "concerns": [
+      "Thứ 2 có 8 nhân viên trễ — cao gấp 2 lần trung bình",
+      "3 device mới chưa trusted xuất hiện trong tuần"
+    ],
+    "recommendations": [
+      "Kiểm tra lại ca làm thứ 2 cho bộ phận Engineering",
+      "Yêu cầu manager duyệt trust cho 3 device mới"
+    ]
+  }
+}
+```
+
+### POST `/ai/chat`
+**Role:** authenticated user. **Streaming SSE** (`Content-Type: text/event-stream`).
+```json
+// Request
+{
+  "message": "Tháng này tôi trễ bao nhiêu lần?",
+  "conversation_id": "uuid-optional"
+}
+```
+**Response stream:**
+```
+data: {"delta": "Tháng", "conversation_id": "uuid"}
+data: {"delta": " này bạn có"}
+data: {"delta": " 2 lần trễ"}
+data: {"delta": "..."}
+data: [DONE]
+```
+Scope enforcement:
+- `employee` → context chỉ bao gồm dữ liệu của chính user
+- `manager` → branch mình quản lý
+- `admin` → toàn hệ thống
+- `AIGuard` reject nếu phát hiện query cross-user → trả lời "Tôi không có quyền truy cập dữ liệu của người khác"
+
+### GET `/ai/chat/history`
+Query: `?limit=50&before=cursor`
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "conversation_id": "uuid",
+      "role": "user",
+      "content": "...",
+      "created_at": "..."
+    }
+  ]
+}
+```
+
+---
+
+## 5F. Streak module
+
+### GET `/attendance/me/streak`
+**Role:** employee.
+```json
+{
+  "data": {
+    "current": 12,
+    "best": 45,
+    "on_time_rate_30d": 0.93,
+    "heatmap": [
+      { "date": "2026-04-17", "status": "on_time" },
+      { "date": "2026-04-16", "status": "on_time" },
+      { "date": "2026-04-15", "status": "late" }
+      // ... 30 entries
+    ]
+  }
+}
+```
+
+---
+
 ## 6. Reports module
 
 ### GET `/reports/daily-summary`
@@ -624,6 +796,20 @@ Stream CSV.
 }
 ```
 
+### GET `/dashboard/live` (SSE)
+**Roles:** admin (all), manager (own branches). **Streaming** `text/event-stream`.
+
+Events emit khi có `attendance_events.status = success` sau commit:
+```
+event: checkin
+data: {"event_id":"uuid","employee_code":"EMP001","full_name":"Nguyễn Văn A","branch_name":"HCM-Q1","status":"on_time","trust_score":88,"trigger":"manual","created_at":"2026-04-17T08:05:12Z"}
+
+event: heartbeat
+data: {"ts":"2026-04-17T08:05:27Z"}
+```
+
+Client dùng `EventSource('/api/v1/dashboard/live', { headers: { Authorization } })`. Heartbeat mỗi 15s. Server đóng connection khi client disconnect.
+
 ---
 
 ## 8. Work schedules module
@@ -745,6 +931,15 @@ Filter: `?user_id=...&entity_type=branch&date_from=...`
 | `ZERO_TAP_OUTSIDE_WINDOW` | 422 | Ngoài `zero_tap_window` của branch |
 | `DEVICE_NOT_TRUSTED_FOR_ZERO_TAP` | 422 | Device chưa đủ manual check-in |
 | `DEVICE_LOCK_REQUIRED` | 422 | Màn hình khóa sinh trắc học chưa bật |
+| `FACE_NOT_ENROLLED` | 422 | Employee chưa enroll face embedding |
+| `FACE_NOT_DETECTED` | 422 | Không detect khuôn mặt trong selfie |
+| `FACE_MISMATCH` | 422 | Cosine similarity < threshold (0.85) |
+| `FACE_ENROLLMENT_INCONSISTENT` | 422 | 3 ảnh enroll lệch nhau quá lớn |
+| `QR_INVALID_SIGNATURE` | 401 | HMAC không khớp secret |
+| `QR_EXPIRED` | 422 | Token ngoài time bucket ±1 |
+| `QR_ALREADY_USED` | 409 | Session hôm nay đã dùng QR check-in |
+| `AI_SCOPE_VIOLATION` | 403 | Employee query data user khác / thiếu scope |
+| `AI_RATE_LIMIT` | 429 | Quá hạn ngạch Gemini |
 
 ---
 
@@ -759,6 +954,11 @@ Filter: `?user_id=...&entity_type=branch&date_from=...`
 | `POST /attendance/zero-tap/check-out` | 3 / phút / device |
 | `PATCH /attendance/zero-tap/settings/me` | 10 / giờ / employee |
 | `POST /reports/export` | 3 / phút / user |
+| `POST /attendance/qr-check-in` | 5 / phút / device |
+| `POST /employees/me/face/enroll` | 3 / giờ / user |
+| `POST /ai/chat` | 20 / giờ / user |
+| `GET /ai/insights/weekly` | 10 / giờ / user |
+| `GET /dashboard/live` (SSE) | 3 connections đồng thời / user |
 | Other admin APIs | 60 / phút / user |
 
 Header response:
@@ -778,5 +978,7 @@ API sẽ expose `/api/docs` (Swagger UI) auto-generated từ NestJS decorators.
 
 ## 13. Changelog
 
+- **v0.4** (2026-04-17): Bỏ module **§5C Face verify** khỏi MVP. `POST /attendance/check-in` không còn nhận `selfie_base64`; `POST /attendance/qr-check-in` chỉ cần `token + latitude + longitude + device_fingerprint`. Error code `FACE_*` (§10) dời sang "out of scope". Rate limit `/employees/me/face/enroll` deprecated.
+- **v0.3** (2026-04-17): Thêm module §5C **Face verify**, §5D **QR Kiosk** (TOTP HMAC), §5E **AI Gemini** (Insights + Chat SSE), §5F **Streak**, §7.5 **Live check-in SSE**. Mở rộng body `POST /attendance/check-in` với `wifi_scan` + `selfie_base64`. Thêm 10 error code (FACE_*, QR_*, AI_*) và rate limit cho endpoint mới. Header `X-Kiosk-Token` cho kiosk auth.
 - **v0.2** (2026-04-16): Thêm module §5B zero-tap (check-in/out, settings, branch policy, admin revoke), 8 error code mới, rate limit zero-tap, header `X-Device-Attestation` + `X-Device-Fingerprint`.
 - **v0.1** (2026-04-15): Bản đầu tiên, đầy đủ 8 module.

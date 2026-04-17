@@ -19,9 +19,12 @@ import {
   haversineSpeedKmh,
   type Geofence,
 } from '../../common/utils/geo';
-import { isBssidWhitelisted, isSsidMatch, type WifiConfig } from '../../common/utils/wifi';
+import { findWifiScanMatch, isBssidWhitelisted, isSsidMatch, type WifiConfig } from '../../common/utils/wifi';
 import { calculateTrustScore, type TrustScoreInput } from '../../common/utils/trust-score';
+import { computeStreak, type DailyEntry, type DailyStatus } from '../../common/utils/streak';
 import { ScheduleService } from './schedule.service';
+import { BranchesService } from '../branches/branches.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const IMPOSSIBLE_TRAVEL_KMH = 120;
 const IMPOSSIBLE_TRAVEL_LOOKBACK_MS = 6 * 60 * 60 * 1000;
@@ -44,6 +47,8 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scheduleService: ScheduleService,
+    private readonly branchesService: BranchesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async detectImpossibleTravel(
@@ -101,14 +106,8 @@ export class AttendanceService {
     ];
     const uniqueBranchIds = [...new Set(branchIds)];
 
-    // 3. Load branch configs (geofences + WiFi)
-    const branches = await this.prisma.branch.findMany({
-      where: { id: { in: uniqueBranchIds }, status: 'active' },
-      include: {
-        geofences: { where: { isActive: true } },
-        wifiConfigs: { where: { isActive: true } },
-      },
-    });
+    // 3. Load branch configs (geofences + WiFi) — Redis cache TTL 5'
+    const branches = await this.branchesService.loadConfigsCached(uniqueBranchIds);
 
     // 4. Find which branch the check-in belongs to
     let matchedBranch: typeof branches[0] | null = null;
@@ -157,7 +156,9 @@ export class AttendanceService {
         isActive: w.isActive,
       }));
 
-      if (isBssidWhitelisted(dto.bssid, wifiConfigs)) {
+      // Prefer full wifi_scan (Day 5 multi-factor); fall back to single bssid/ssid.
+      const scanHit = findWifiScanMatch(dto.wifi_scan, wifiConfigs);
+      if (scanHit || isBssidWhitelisted(dto.bssid, wifiConfigs)) {
         bssidMatch = true;
         matchedBranch = branch;
       } else if (isSsidMatch(dto.ssid, wifiConfigs)) {
@@ -292,6 +293,8 @@ export class AttendanceService {
             device_name: dto.device_name,
             app_version: dto.app_version,
           },
+          wifiScan: dto.wifi_scan ? (dto.wifi_scan as unknown as object) : undefined,
+          trigger: 'manual',
         },
       });
 
@@ -381,14 +384,8 @@ export class AttendanceService {
     // Re-check-out allowed: updates the existing checkOutAt timestamp.
     // Every attempt is still logged in attendance_events for audit trail.
 
-    // 3. Load branch configs for validation
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: session.branchId },
-      include: {
-        geofences: { where: { isActive: true } },
-        wifiConfigs: { where: { isActive: true } },
-      },
-    });
+    // 3. Load branch configs for validation — Redis cache TTL 5'
+    const branch = await this.branchesService.getConfigCached(session.branchId);
 
     // 4. Validate location (same logic as check-in)
     let gpsValid = false;
@@ -611,6 +608,37 @@ export class AttendanceService {
     return device;
   }
 
+  // ─── STREAK ────────────────────────────────────────────────
+
+  async getMyStreak(employeeUserId: string) {
+    const employee = await this.prisma.employee.findUniqueOrThrow({
+      where: { userId: employeeUserId },
+    });
+
+    const today = todayInVN();
+    const from = new Date(today);
+    from.setUTCDate(from.getUTCDate() - 89); // 90-day lookback for best-streak history
+
+    const sessions = await this.prisma.attendanceSession.findMany({
+      where: { employeeId: employee.id, workDate: { gte: from, lte: today } },
+      select: { workDate: true, status: true },
+      orderBy: { workDate: 'asc' },
+    });
+
+    const entries: DailyEntry[] = sessions.map((s) => ({
+      date: s.workDate.toISOString().slice(0, 10),
+      status: s.status as DailyStatus,
+    }));
+
+    const result = computeStreak(entries, { today });
+    return {
+      current: result.current,
+      best: result.best,
+      on_time_rate_30d: Math.round(result.onTimeRate30d * 1000) / 1000,
+      heatmap: result.heatmap,
+    };
+  }
+
   // ─── HISTORY & MANAGER ─────────────────────────────────────
 
   async getMyAttendance(employeeUserId: string, dto: ListMyAttendanceDto) {
@@ -739,6 +767,10 @@ export class AttendanceService {
   async overrideSession(managerUserId: string, isSuperAdmin: boolean, sessionId: string, dto: OverrideSessionDto) {
     const session = await this.prisma.attendanceSession.findUnique({
       where: { id: sessionId },
+      include: {
+        employee: { select: { user: { select: { id: true } } } },
+        branch: { select: { name: true } },
+      },
     });
 
     if (!session) throw new NotFoundException('Session not found');
@@ -778,6 +810,15 @@ export class AttendanceService {
       });
 
       return updated;
+    });
+
+    // Notify the affected employee that their session was overridden by a manager.
+    await this.notifications.create({
+      userId: session.employee.user.id,
+      type: 'override',
+      title: 'Phiên chấm công đã được điều chỉnh',
+      body: `Quản lý đã cập nhật phiên ngày ${session.workDate.toISOString().slice(0, 10)} tại ${session.branch.name} thành "${status}".`,
+      data: { sessionId, previousStatus: session.status, newStatus: status, note },
     });
 
     return result;

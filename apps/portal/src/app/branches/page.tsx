@@ -360,6 +360,10 @@ function DetailDrawer({
               onChange={loadDetail}
             />
 
+            <ZeroTapSection branchId={branch.id} canEdit={canEdit} />
+
+            <QrSecretSection branchId={branch.id} canEdit={canEdit} />
+
             {canEdit && (
               <div className="mt-8 border-t border-slate-200 pt-4">
                 <button
@@ -715,6 +719,165 @@ function GeofenceSection({
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+function ZeroTapSection({ branchId, canEdit }: { branchId: string; canEdit: boolean }) {
+  const [policy, setPolicy] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    enabled: false,
+    window_start: '07:30',
+    window_end: '09:30',
+    cooldown_seconds: 600,
+    min_manual_checkins_to_enable: 2,
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const res = await getApi().get(`branches/${branchId}/zero-tap-policy`).json<{ data: any }>();
+      setPolicy(res.data);
+      setForm({
+        enabled: res.data?.enabled ?? false,
+        window_start: res.data?.windowStart ?? '07:30',
+        window_end: res.data?.windowEnd ?? '09:30',
+        cooldown_seconds: res.data?.cooldownSeconds ?? 600,
+        min_manual_checkins_to_enable: res.data?.minManualCheckinsToEnable ?? 2,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [branchId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await getApi().put(`branches/${branchId}/zero-tap-policy`, { json: form });
+      setEditing(false);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <section className="mt-6 border-t border-slate-200 pt-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Zero-Tap Policy</h3>
+        {canEdit && (
+          <button onClick={() => setEditing((v) => !v)} className="text-xs text-slate-600 hover:underline">
+            {editing ? 'Cancel' : 'Edit'}
+          </button>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+
+      {!editing && policy && (
+        <dl className="mt-2 space-y-1 text-sm">
+          <Row label="Status" value={policy.enabled ? 'Enabled' : 'Disabled'} />
+          {policy.enabled && (
+            <>
+              <Row label="Active Window" value={`${policy.windowStart} - ${policy.windowEnd}`} />
+              <Row label="Cooldown" value={`${policy.cooldownSeconds}s`} />
+              <Row label="Min Manual Checkins" value={String(policy.minManualCheckinsToEnable)} />
+            </>
+          )}
+        </dl>
+      )}
+
+      {editing && (
+        <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
+            />
+            <span className="font-medium">Enable Zero-Tap for this branch</span>
+          </label>
+          <div className="flex gap-2">
+            <input
+              className="block w-full rounded-lg border border-slate-200 px-3 py-1.5 focus:border-brand-500 focus:outline-none"
+              placeholder="Start HH:MM"
+              value={form.window_start}
+              onChange={(e) => setForm((f) => ({ ...f, window_start: e.target.value }))}
+            />
+            <input
+              className="block w-full rounded-lg border border-slate-200 px-3 py-1.5 focus:border-brand-500 focus:outline-none"
+              placeholder="End HH:MM"
+              value={form.window_end}
+              onChange={(e) => setForm((f) => ({ ...f, window_end: e.target.value }))}
+            />
+          </div>
+          <input
+            type="number"
+            className="block w-full rounded-lg border border-slate-200 px-3 py-1.5 focus:border-brand-500 focus:outline-none"
+            placeholder="Cooldown (seconds)"
+            value={form.cooldown_seconds}
+            onChange={(e) => setForm((f) => ({ ...f, cooldown_seconds: Number(e.target.value) }))}
+          />
+          <input
+            type="number"
+            className="block w-full rounded-lg border border-slate-200 px-3 py-1.5 focus:border-brand-500 focus:outline-none"
+            placeholder="Min manual checkins (e.g. 2)"
+            value={form.min_manual_checkins_to_enable}
+            onChange={(e) => setForm((f) => ({ ...f, min_manual_checkins_to_enable: Number(e.target.value) }))}
+          />
+          <button onClick={submit} className="btn-primary py-1 text-xs mt-2 w-full">Save Policy</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function QrSecretSection({ branchId, canEdit }: { branchId: string; canEdit: boolean }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ensureSecret = async () => {
+    setLoading(true); setError(null);
+    try {
+      await getApi().post(`branches/${branchId}/qr-secret/ensure`);
+      alert('Secret Ensure called successfully');
+    } catch(e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  const rotateSecret = async () => {
+    if (!confirm('Rotate will invalidate the current Kiosk token immediately. Proceed?')) return;
+    setLoading(true); setError(null);
+    try {
+      await getApi().post(`branches/${branchId}/qr-secret/rotate`);
+      alert('Secret Rotated. Please refresh Kiosk.');
+    } catch(e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <section className="mt-6 border-t border-slate-200 pt-4 pb-8">
+      <h3 className="text-sm font-semibold">QR Kiosk</h3>
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+      <div className="mt-2 flex flex-col gap-2">
+        <a href={`/kiosk/${branchId}`} target="_blank" className="text-sm text-brand-600 hover:underline">
+          ↗ Open Kiosk View
+        </a>
+        {canEdit && (
+          <div className="flex gap-2">
+            <button onClick={ensureSecret} disabled={loading} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
+              Ensure Secret
+            </button>
+            <button onClick={rotateSecret} disabled={loading} className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50">
+              Rotate Secret
+            </button>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

@@ -12,6 +12,7 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Cần quyền vị trí để check-in tại chi nhánh.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Cần quyền vị trí nền để zero-tap check-in khi vào vùng chi nhánh.",
+        "NSCameraUsageDescription": "Cần quyền máy ảnh để quét mã QR Kiosk.",
         "UIBackgroundModes": ["location", "fetch"]
       }
     },
@@ -24,12 +25,19 @@
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_STATE",
         "NEARBY_WIFI_DEVICES",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "CAMERA"
       ]
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cần quyền máy ảnh để quét mã QR Kiosk."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
