@@ -741,7 +741,8 @@ function CreateModal({
         <label className="block text-sm">
           <span className="text-slate-600">Password (≥6)</span>
           <input
-            type="text"
+            type="password"
+            autoComplete="new-password"
             required
             minLength={6}
             className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-mono text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"

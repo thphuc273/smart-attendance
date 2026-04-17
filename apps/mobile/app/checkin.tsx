@@ -350,7 +350,7 @@ export default function CheckinScreen() {
         </View>
 
         {setting && (
-          <Pressable onPress={toggleZeroTap} style={[styles.historyLink, { marginTop: 16, backgroundColor: setting.zeroTapEnabled ? colors.emerald50 : colors.slate50 }]}>
+          <Pressable onPress={toggleZeroTap} style={[styles.historyLink, { marginTop: 16, backgroundColor: setting.zeroTapEnabled ? colors.emerald100 : colors.slate100 }]}>
             <View>
               <Text style={[styles.historyLinkText, { color: setting.zeroTapEnabled ? colors.emerald700 : colors.slate700 }]}>
                 {setting.zeroTapEnabled ? '⚡ Zero-tap đang BẬT' : '⚡ Zero-tap đang TẮT'}
