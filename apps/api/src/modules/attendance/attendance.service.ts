@@ -365,12 +365,8 @@ export class AttendanceService {
       });
     }
 
-    if (session.checkOutAt) {
-      throw new ConflictException({
-        code: 'ALREADY_CHECKED_OUT',
-        message: 'Already checked out today',
-      });
-    }
+    // Re-check-out allowed: updates the existing checkOutAt timestamp.
+    // Every attempt is still logged in attendance_events for audit trail.
 
     // 3. Load branch configs for validation
     const branch = await this.prisma.branch.findUnique({

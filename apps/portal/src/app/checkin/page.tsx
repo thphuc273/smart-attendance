@@ -113,7 +113,7 @@ export default function CheckinPage() {
       setLastResult(resp.data);
       setMessage({
         kind: 'ok',
-        text: `✅ Check-${kind} thành công tại ${resp.data.branch.name}. Trust ${resp.data.trust_score}/100 (${resp.data.trust_level})`,
+        text: `✅ Check-${kind === 'in' ? 'in' : 'out'} thành công tại ${resp.data.branch.name}`,
       });
       await loadHistory();
     } catch (e) {
@@ -143,10 +143,16 @@ export default function CheckinPage() {
             } else if (body.error.details?.distance_meters != null) {
               text += ` (cách geofence ${body.error.details.distance_meters}m)`;
             }
-            if (body.error.details?.risk_flags?.length) {
-              text += `\n🚩 ${body.error.details.risk_flags.join(', ')}`;
+            // Keep debug payload but strip security-internal fields
+            // (trust_score / risk_flags are for admin/manager only)
+            const d = body.error.details;
+            if (d) {
+              debug = {
+                distance_meters: d.distance_meters,
+                user_location: d.user_location,
+                scanned_branches: d.scanned_branches,
+              };
             }
-            debug = body.error.details;
           }
         }
       } catch {
@@ -207,17 +213,21 @@ export default function CheckinPage() {
           <div className="mt-5 flex gap-3">
             <button
               onClick={() => doCheck('in')}
-              disabled={submitting !== null || (checkedIn && !today?.checkOutAt)}
+              disabled={submitting !== null || checkedIn}
               className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 py-3.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-md"
             >
               {submitting === 'in' ? 'Đang check-in…' : checkedIn ? '✓ Đã check-in' : '→ Check-in'}
             </button>
             <button
               onClick={() => doCheck('out')}
-              disabled={submitting !== null || !checkedIn || checkedOut}
+              disabled={submitting !== null || !checkedIn}
               className="flex-1 rounded-xl border-2 border-brand-600 bg-white py-3 text-sm font-semibold text-brand-700 transition-colors hover:bg-brand-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting === 'out' ? 'Đang check-out…' : checkedOut ? '✓ Đã check-out' : '← Check-out'}
+              {submitting === 'out'
+                ? 'Đang check-out…'
+                : checkedOut
+                  ? '↻ Cập nhật check-out'
+                  : '← Check-out'}
             </button>
           </div>
 
@@ -247,25 +257,31 @@ export default function CheckinPage() {
           {lastResult && (
             <dl className="mt-4 space-y-1.5 rounded-xl bg-gradient-to-br from-brand-50/50 to-violet-50/50 p-4 text-xs">
               <div className="flex justify-between">
-                <dt className="text-slate-500">Validation</dt>
-                <dd className="font-mono font-semibold text-slate-900">{lastResult.validation_method}</dd>
+                <dt className="text-slate-500">Chi nhánh</dt>
+                <dd className="font-semibold text-slate-900">{lastResult.branch.name}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-slate-500">Trust score</dt>
-                <dd className="font-mono font-semibold text-brand-700">
-                  {lastResult.trust_score} <span className="font-normal">({lastResult.trust_level})</span>
-                </dd>
-              </div>
-              {lastResult.risk_flags.length > 0 && (
+              {lastResult.check_in_at && (
                 <div className="flex justify-between">
-                  <dt className="text-slate-500">Risk flags</dt>
-                  <dd className="font-mono text-amber-600">{lastResult.risk_flags.join(', ')}</dd>
+                  <dt className="text-slate-500">Thời gian check-in</dt>
+                  <dd className="font-mono font-semibold text-slate-900">
+                    {new Date(lastResult.check_in_at).toLocaleTimeString('vi-VN')}
+                  </dd>
+                </div>
+              )}
+              {lastResult.check_out_at && (
+                <div className="flex justify-between">
+                  <dt className="text-slate-500">Thời gian check-out</dt>
+                  <dd className="font-mono font-semibold text-slate-900">
+                    {new Date(lastResult.check_out_at).toLocaleTimeString('vi-VN')}
+                  </dd>
                 </div>
               )}
               {lastResult.worked_minutes !== undefined && (
                 <div className="flex justify-between">
-                  <dt className="text-slate-500">Worked</dt>
-                  <dd className="font-mono font-semibold text-slate-900">{lastResult.worked_minutes} min</dd>
+                  <dt className="text-slate-500">Thời gian làm</dt>
+                  <dd className="font-mono font-semibold text-slate-900">
+                    {Math.floor(lastResult.worked_minutes / 60)}h {lastResult.worked_minutes % 60}m
+                  </dd>
                 </div>
               )}
               {lastResult.overtime_minutes !== undefined && lastResult.overtime_minutes > 0 && (
@@ -295,7 +311,6 @@ export default function CheckinPage() {
                     <th className="px-4 py-3">In</th>
                     <th className="px-4 py-3">Out</th>
                     <th className="px-4 py-3 text-right">Late / OT</th>
-                    <th className="px-4 py-3 text-right">Trust</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -322,9 +337,6 @@ export default function CheckinPage() {
                         {s.overtimeMinutes ? <span className="font-semibold text-emerald-600">OT{s.overtimeMinutes}</span> : null}
                         {!s.lateMinutes && !s.overtimeMinutes ? <span className="text-slate-300">—</span> : null}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <TrustPill score={s.trustScore} />
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -348,17 +360,6 @@ function StatusPill({ status }: { status: string }) {
   };
   const cls = TONE[status] ?? 'bg-slate-100 text-slate-600';
   return <span className={`badge ${cls}`}>{status}</span>;
-}
-
-function TrustPill({ score }: { score: number | null }) {
-  if (score === null) return <span className="text-xs text-slate-300">—</span>;
-  const cls =
-    score >= 70
-      ? 'bg-emerald-100 text-emerald-700'
-      : score >= 40
-        ? 'bg-amber-100 text-amber-700'
-        : 'bg-rose-100 text-rose-700';
-  return <span className={`badge font-mono ${cls}`}>{score}</span>;
 }
 
 function HistorySummary({ history }: { history: Session[] }) {
