@@ -4,11 +4,14 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { getApi } from '../../../lib/api';
 
-interface QrTokenResp {
+interface QrTokenData {
   token: string;
   expires_at: string;
   bucket_seconds: number;
   refresh_every_seconds: number;
+}
+interface QrTokenResp {
+  data: QrTokenData;
 }
 
 export default function KioskPage() {
@@ -18,7 +21,7 @@ export default function KioskPage() {
 
   const [kioskToken, setKioskToken] = useState<string | null>(null);
   const [tokenInput, setTokenInput] = useState('');
-  const [tokenData, setTokenData] = useState<QrTokenResp | null>(null);
+  const [tokenData, setTokenData] = useState<QrTokenData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(25);
 
@@ -41,9 +44,9 @@ export default function KioskPage() {
           })
           .json<QrTokenResp>();
         if (unmounted) return;
-        setTokenData(res);
+        setTokenData(res.data);
         setError(null);
-        const remains = Math.max(1, res.refresh_every_seconds || 25);
+        const remains = Math.max(1, res.data.refresh_every_seconds || 25);
         setTimeLeft(remains);
       } catch (err) {
         if (!unmounted) setError((err as Error).message);
