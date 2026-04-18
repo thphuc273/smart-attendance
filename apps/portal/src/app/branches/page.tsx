@@ -845,9 +845,12 @@ function QrSecretSection({ branchId, canManage }: { branchId: string; canManage:
     if (!confirm('Rotate sẽ vô hiệu hóa kiosk token hiện tại. Tiếp tục?')) return;
     setLoading(true); setError(null);
     try {
-      const resp = await getApi().put(`branches/${branchId}/qr-secret`).json<{ kiosk_token: string }>();
-      setLastToken(resp.kiosk_token);
-      localStorage.setItem(`kiosk_token_${branchId}`, resp.kiosk_token);
+      const resp = await getApi()
+        .put(`branches/${branchId}/qr-secret`)
+        .json<{ data: { kiosk_token: string } }>();
+      const token = resp.data.kiosk_token;
+      setLastToken(token);
+      localStorage.setItem(`kiosk_token_${branchId}`, token);
     } catch(e) { setError((e as Error).message); }
     finally { setLoading(false); }
   };
