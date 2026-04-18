@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApi, getStoredUser, isAdmin, isManager, StoredUser } from '../../lib/api';
 import { colors, radius } from '../../lib/theme';
 
@@ -52,6 +53,7 @@ function getSuggestions(user: StoredUser | null): string[] {
 }
 
 export default function ChatTab() {
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<StoredUser | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -196,7 +198,7 @@ export default function ChatTab() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={80}
     >
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>🤖 Trợ lý AI</Text>
           <Text style={styles.subtitle}>{roleLabel} • Hỏi về ca làm, phép, chấm công…</Text>

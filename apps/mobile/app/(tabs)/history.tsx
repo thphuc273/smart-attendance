@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApi, hasToken } from '../../lib/api';
 import { colors, radius, shadow, statusTone } from '../../lib/theme';
 
@@ -42,6 +43,7 @@ function vnDateString(d: Date): string {
 
 export default function HistoryTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -104,7 +106,7 @@ export default function HistoryTab() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>Lịch sử chấm công</Text>
         <Text style={styles.subtitle}>
           {sessions.length} / {totalPages * PAGE_SIZE}+ phiên
@@ -183,7 +185,7 @@ function SessionRow({ session }: { session: Session }) {
           </View>
         )}
       </View>
-      {(session.lateMinutes || session.overtimeMinutes) && (
+      {!!(session.lateMinutes || session.overtimeMinutes) && (
         <View style={styles.deltaRow}>
           {session.lateMinutes ? (
             <View style={[styles.deltaPill, { backgroundColor: colors.amber100 }]}>
@@ -210,7 +212,6 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   header: {
     padding: 20,
-    paddingTop: 56,
     backgroundColor: colors.surface,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,

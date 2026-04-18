@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { clearAuth, getApi, getStoredUser, type StoredUser } from '../../lib/api';
 import {
   disableGeofenceNotify,
@@ -25,6 +26,7 @@ interface ZeroTapDevice {
 
 export default function ProfileTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<StoredUser | null>(null);
   const [device, setDevice] = useState<ZeroTapDevice | null>(null);
   const [zeroTap, setZeroTap] = useState(false);
@@ -101,7 +103,10 @@ export default function ProfileTab() {
   if (loading) return <ActivityIndicator style={{ marginTop: 48 }} />;
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}
+    >
       <View style={styles.card}>
         <Text style={styles.name}>{user?.full_name ?? '—'}</Text>
         <Text style={styles.email}>{user?.email}</Text>
