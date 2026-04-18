@@ -138,13 +138,19 @@ export default function KioskPage() {
   )}`;
 
   const refreshWindow = tokenData.refresh_every_seconds || 25;
-  const radius = 180;
+  const radius = 190;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (timeLeft / refreshWindow) * circumference;
+  const progress = timeLeft / refreshWindow;
+  const strokeDashoffset = circumference - progress * circumference;
+  const isUrgent = timeLeft <= 5;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-900 p-6 font-sans text-slate-100 selection:bg-brand-500/30">
-      <div className="absolute top-8 left-8">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#0b1020] p-6 font-sans text-slate-100 selection:bg-brand-500/30">
+      {/* Ambient gradient blobs */}
+      <div className="pointer-events-none absolute -top-40 -left-40 h-[520px] w-[520px] rounded-full bg-brand-500/20 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-cyan-500/10 blur-3xl" />
+
+      <div className="absolute top-8 left-8 z-10">
         <h1 className="text-3xl font-extrabold tracking-tight text-white">
           FinOS <span className="font-light text-brand-400">Smart Attendance</span>
         </h1>
@@ -154,31 +160,49 @@ export default function KioskPage() {
         </p>
       </div>
 
-      <div className="relative flex items-center justify-center">
-        <svg className="absolute -inset-8 h-[380px] w-[380px] -rotate-90 transform">
+      <div className="relative z-10 flex items-center justify-center">
+        {/* Outer glow halo */}
+        <div
+          className={`absolute h-[440px] w-[440px] rounded-full blur-2xl transition-colors duration-500 ${
+            isUrgent ? 'bg-rose-500/30 animate-pulse' : 'bg-brand-500/20'
+          }`}
+        />
+        {/* Progress ring */}
+        <svg className="absolute h-[420px] w-[420px] -rotate-90 transform">
+          <defs>
+            <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#22d3ee" />
+              <stop offset="100%" stopColor="#6366f1" />
+            </linearGradient>
+            <linearGradient id="ringGradientUrgent" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#fb7185" />
+              <stop offset="100%" stopColor="#f43f5e" />
+            </linearGradient>
+          </defs>
           <circle
-            cx="190"
-            cy="190"
+            cx="210"
+            cy="210"
             r={radius}
             stroke="currentColor"
-            strokeWidth="8"
+            strokeWidth="6"
             fill="transparent"
-            className="text-slate-800"
+            className="text-white/5"
           />
           <circle
-            cx="190"
-            cy="190"
+            cx="210"
+            cy="210"
             r={radius}
-            stroke="currentColor"
-            strokeWidth="8"
+            stroke={isUrgent ? 'url(#ringGradientUrgent)' : 'url(#ringGradient)'}
+            strokeWidth="10"
             fill="transparent"
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
             strokeLinecap="round"
-            className="text-brand-500 transition-all duration-1000 ease-linear"
+            className="transition-all duration-1000 ease-linear drop-shadow-[0_0_12px_rgba(99,102,241,0.6)]"
           />
         </svg>
-        <div className="relative rounded-2xl bg-white p-6 shadow-2xl">
+        {/* QR card */}
+        <div className="relative rounded-3xl bg-white p-6 shadow-[0_20px_60px_-10px_rgba(99,102,241,0.5)] ring-1 ring-white/10">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={qrUrl}
@@ -188,10 +212,31 @@ export default function KioskPage() {
         </div>
       </div>
 
-      <div className="mt-16 space-y-2 text-center">
-        <p className="font-mono text-5xl font-bold tracking-tight tabular-nums text-white">
-          00:{timeLeft.toString().padStart(2, '0')}
-        </p>
+      {/* Countdown card */}
+      <div className="relative z-10 mt-16 flex flex-col items-center gap-3">
+        <div
+          className={`flex items-baseline gap-3 rounded-2xl border px-8 py-4 backdrop-blur-md transition-colors duration-500 ${
+            isUrgent
+              ? 'border-rose-400/40 bg-rose-500/10'
+              : 'border-white/10 bg-white/5'
+          }`}
+        >
+          <span
+            className={`h-2.5 w-2.5 rounded-full ${
+              isUrgent ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'
+            } shadow-[0_0_12px_currentColor]`}
+          />
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+            {isUrgent ? 'Refreshing soon' : 'Next refresh in'}
+          </span>
+          <span
+            className={`font-mono text-5xl font-bold tabular-nums tracking-tight transition-colors duration-300 ${
+              isUrgent ? 'text-rose-300' : 'text-white'
+            }`}
+          >
+            00:{timeLeft.toString().padStart(2, '0')}
+          </span>
+        </div>
         <p className="text-lg text-slate-400">
           Mở ứng dụng FinOS Employee, quét mã để Check-in
         </p>

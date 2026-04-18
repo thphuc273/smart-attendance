@@ -1288,3 +1288,63 @@ Schema thay đổi:
 - [ ] Rotate audit log đã có (Session #013); cần UI filter `entityType=BranchQrSecret` + "who rotated last?" trên branch detail.
 - [ ] Expo Dev Client với Node 22 LTS — nên document trong README phần Dev Setup.
 
+---
+
+## Session #015 — 2026-04-18 — Kiosk UX polish + QR check-in bug hunt + mobile JWT refresh
+
+### 1. Prompts (theo thứ tự thời gian)
+
+1. *(tiếp nối Session #014)* — `pnpm start` portal fail: `"next start" does not work with "output: standalone"` + `MODULE_NOT_FOUND` `vendor-chunks/next@15.5.15_...`.
+2. "tạo lại bộ đếm ngược thời gian cho kiosk view hiện đại và đẹp hơn".
+3. "lỗi qr checkin trên mobile không checkin được, lỗi api".
+4. "tại sao tạo mã qr tại cùng 1 chi nhánh, nhân viên tại chi nhánh đó quét thì báo mã qr không hợp lệ (không phải kiosk qr của chi nhánh)".
+5. *(runtime error paste)* — `⨯ The requested resource isn't a valid image for /finos-logo.png received null` sau khi boot standalone server trực tiếp (không qua `pnpm start`).
+6. "vẫn báo là mã qr checkin không hợp lệ dù checkin trên mobile cùng chi nhánh, đúng wifi đúng geo đúng ca làm".
+7. "lỗi 422, request fail to api qr-check-in".
+8. "không checkin được, too many request, jwt expired".
+9. "update lại prompt log tất cả các câu tôi hỏi bạn ở trên, update lại tài liệu sản phẩm nếu có tính năng gì mới, cập nhật github".
+
+### 2. Quyết định kỹ thuật
+
+| # | Vấn đề | Quyết định | Lý do |
+| - | --- | --- | --- |
+| 1 | `next start` không tương thích `output: 'standalone'`; Dockerfile đã cần standalone cho runtime stage | Giữ `output: 'standalone'`, rewrite `start` script = `cp -R public + .next/static → .next/standalone/apps/portal/ && node server.js` | Matching Docker runtime đúng 1:1, không maintain 2 mode build riêng. |
+| 2 | Countdown ring UI cũ đơn sơ (SVG 1 màu 8px) | Redesign: gradient stroke (cyan→indigo), halo glow, urgent state (≤5s → rose + pulse), glassmorphic countdown pill, ambient blurred blobs background | Kiosk chạy fullscreen cả ngày; UI chuyên nghiệp = brand trust. |
+| 3 | Mobile `scanner.tsx` post sai payload: field `token` (thay vì `qr_token`), thiếu `branch_id` + `platform` → DTO reject | Rewrite: parse QR → `{branch_id, qr_token}` → gửi đủ fields kèm `Platform.OS`, `accuracy_meters` | `forbidNonWhitelisted: true` nuốt `token` field → phải dùng đúng tên DTO. |
+| 4 | QR chỉ chứa `v1.xxx.yyy` → mobile không biết `branch_id` | Scanner tự decode base64url payload của token (`${branchId}.${bucket}.${nonce}`) → extract branch_id client-side. Vẫn accept JSON `{b, t}` làm fallback | Backend đã encode branch_id trong token; không cần đổi QR format → QR nhỏ hơn, dễ scan hơn. |
+| 5 | Error từ API hiện chung chung "Request failed with status code 422" | Thêm `ERROR_MESSAGES` map (code → tiếng Việt) + `extractApiError()` đọc `response.json().error.code/message` | Nhân viên cần biết lý do cụ thể (device not trusted vs wifi fail vs throttle). |
+| 6 | Access token hết hạn → 401 → user phải re-login thủ công | `afterResponse` hook ở `lib/api.ts`: 401 → POST `/auth/refresh` với stored refresh_token → replay request với token mới. `refreshInFlight` dedup concurrent calls | Matching portal UX; tránh spam-login. |
+| 7 | `/finos-logo.png` null sau khi boot server trực tiếp | Standalone output không tự copy `public/` + `.next/static` — phải chạy qua `pnpm start` (script đã chain cp) | Next.js standalone by design không bundle static assets; cần explicit copy step. |
+
+### 3. Files sửa
+
+Branch: `fix/kiosk-mobile-scan-jwt-refresh` (cắt từ `develop`)
+
+- **`apps/portal/package.json`** — `start` script chain `cp` static/public + boot `server.js` từ standalone.
+- **`apps/portal/src/app/kiosk/[branchId]/page.tsx`** — countdown ring redesign (gradient + halo + urgent state + glass pill). QR content = raw token (reverted khỏi JSON wrapping sau khi scanner decode được branch_id).
+- **`apps/mobile/app/scanner.tsx`**:
+  - `parseKioskPayload()` accept JSON `{b, t}` **hoặc** raw `v1.<payload>.<sig>` (base64url decode → split → extract branchId).
+  - Body gửi đủ `qr_token`, `branch_id`, `platform`, `accuracy_meters`.
+  - `ERROR_MESSAGES` + `extractApiError()` → Alert hiển thị tiếng Việt theo error code.
+- **`apps/mobile/lib/api.ts`** — `afterResponse` hook: 401 → auto refresh + retry. `refreshInFlight` promise dedup.
+
+### 4. Kết quả test
+
+- `apps/portal`: `pnpm build` ✓ · standalone smoke test `curl /` → 200 ✓
+- `apps/mobile`: `npx tsc --noEmit` ✓ · parse logic verified qua node harness với real `signQrToken` output (raw + JSON cùng trả đúng `{branch_id, qr_token}`).
+- API contract không đổi → không cần rerun API test.
+
+### 5. Lessons
+
+- **Next.js standalone + pnpm start phải chain cp**: `output: 'standalone'` cố tình không copy static/public để người vận hành có quyền chọn CDN vs app-origin. Trong dev local, phải tự copy hoặc dùng `next dev`.
+- **`forbidNonWhitelisted: true` + typo field name = silent 400**: DTO validation reject field lạ trước khi vào handler. Khi debug, check tên field trong DTO TRƯỚC khi đổ lỗi cho business logic.
+- **Đừng ép client xử lý JSON nếu backend đã encode info trong token**: QR chứa raw HMAC token là pattern chuẩn (TOTP-style). Mobile đọc branch_id từ payload là đủ.
+- **`afterResponse` hook cần exclude refresh/login endpoints**: Nếu không, refresh fail → retry refresh → vòng lặp. Match URL trước khi quyết định refresh.
+- **Rate limit 5/min dễ trip khi test thủ công**: Cân nhắc `dev` throttle config riêng (hoặc skip throttle cho localhost IP) nếu QA phiền — hiện giữ nguyên để sát production.
+
+### 6. Follow-up
+
+- [ ] Dev-mode throttle relaxation (skip guard cho `127.0.0.1` trong `NODE_ENV=development`).
+- [ ] `DEVICE_NOT_TRUSTED` onboarding: khi user lần đầu dùng app, scanner nên hiện tip "Hãy check-in manual 1 lần trước" thay vì chỉ báo lỗi sau khi scan.
+- [ ] Portal `postbuild` hook tự copy static/public vào standalone để `node server.js` chạy được mà không cần `pnpm start` wrapper.
+

@@ -544,16 +544,16 @@ Rotate bucket mỗi 30s. Portal client tự fetch mỗi `refresh_every_seconds` 
 
 ### POST `/attendance/qr-check-in`
 **Role:** employee (mobile scan).
+
+Mobile scanner nhận raw token từ QR (`v1.<base64url(branchId.bucket.nonce)>.<sig>`), tự base64-decode payload để lấy `branch_id`, rồi gửi:
 ```json
-// Request
+// Request (extends CheckInDto)
 {
   "branch_id": "uuid",
-  "token": "v1.HMAC_BASE64_URL",
-  "nonce": "01JKQ...",
+  "qr_token": "v1.HMAC_BASE64_URL",
   "latitude": 10.7770,
   "longitude": 106.7010,
   "accuracy_meters": 12,
-  "selfie_base64": "data:image/jpeg;base64,...",
   "device_fingerprint": "ios-abc123",
   "platform": "ios",
   "app_version": "1.0.0"
@@ -561,12 +561,16 @@ Rotate bucket mỗi 30s. Portal client tự fetch mỗi `refresh_every_seconds` 
 // Response 201 tương tự /attendance/check-in + trigger = "qr_kiosk"
 ```
 **Errors:**
-- 401 `QR_INVALID_SIGNATURE` — HMAC sai
-- 422 `QR_EXPIRED` — token ngoài bucket ±1
-- 409 `QR_ALREADY_USED` — session hôm nay `qr_token_used_at IS NOT NULL`
-- 422 `FACE_MISMATCH` — cosine < 0.85
-- 422 `FACE_NOT_ENROLLED` — employee chưa enroll face
+- 403 `QR_BAD_SIGNATURE` — HMAC sai (secret đã rotate?)
+- 403 `QR_EXPIRED` — token ngoài bucket ±1 (~60s window)
+- 403 `QR_BRANCH_MISMATCH` — `branch_id` trong body khác branch encoded trong token
+- 403 `QR_MALFORMED` / `QR_BAD_VERSION` — format lạ
+- 403 `BRANCH_NOT_ASSIGNED` — employee không thuộc branch này
+- 404 — branch chưa có kiosk secret (chưa rotate)
+- 409 `QR_ALREADY_USED_TODAY` — session hôm nay `qr_token_used_at IS NOT NULL`
+- 422 `DEVICE_NOT_TRUSTED` — device chưa có manual check-in thành công trước đó
 - 422 `INVALID_LOCATION` — GPS ngoài geofence (QR không fallback WiFi)
+- 429 `RATE_LIMIT_EXCEEDED` — vượt 5 req/phút/IP
 
 ### PUT `/branches/:id/qr-secret`
 **Role:** admin, **manager** (scope-checked qua `BranchScopeGuard` — manager chỉ rotate được branch mình quản lý). Upsert secret (tạo mới nếu chưa có, rotate nếu đã có). Audit log bắt buộc.
