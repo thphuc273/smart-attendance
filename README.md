@@ -162,6 +162,13 @@ Xem [`docs/sprint-plan.md`](docs/sprint-plan.md).
 - **Day 5 hardening (Session #013)**: rename `ZeroTapRevokeReason` enum theo spec (`mock_location_detected/admin_disabled/attestation_failed/branch_disabled/user_opt_out`); auto-revoke device khi phát hiện mock-location / thiếu attestation + cron `zero-tap-revoke-cleanup` (08:00 VN) phục hồi sau 7 ngày; cascade revoke khi admin disable branch policy; manager scope guard cho policy/revoke endpoint; `kiosk_token` lưu sha256 hash + plaintext chỉ trả 1 lần qua `PUT /branches/:id/qr-secret`; QR check-in chặn `BRANCH_NOT_ASSIGNED`; nonce DTO regex `[A-Za-z0-9_-]{16,128}`; full audit log cho rotate/revoke/policy change. **171/171 unit test xanh, build sạch.**
 - **Kiosk UX & Manager access (Session #014, 2026-04-18)**: Manager **quản lý chi nhánh nào thì tạo QR kiosk được cho chi nhánh đó** (enforce qua `BranchScopeGuard` trên `PUT /branches/:id/qr-secret`). Portal rewrite `/kiosk/[branchId]` — gửi `X-Kiosk-Token` header, setup form cho thiết bị chưa có token, fix response shape (`{token, expires_at, bucket_seconds, refresh_every_seconds}`). Branch detail hiển thị plaintext kiosk token inline sau rotate + auto-lưu `localStorage` cho Kiosk View cùng browser. Xoá endpoint chết `POST .../qr-secret/ensure`.
 
+### Sprint 6 (Day 6) — AI Insights + Live SSE + Mobile 5-tab ✨ **NEW**
+- **AI Insights (Gemini)**: `GET /ai/insights/weekly?branch_id?&week_start?` — phân tích tuần làm việc (on-time rate, late trend, top-late employees, recommendations). Cache 1h per (scope, scope_id, week_start) trong bảng `ai_insights_cache`. Scope filter: admin xem toàn hệ thống, manager chỉ xem branch mình quản lý. Rate limit 10/h/user.
+- **Chat HR Assistant**: `POST /ai/chat` SSE streaming — hỏi về ca làm, phép, chấm công. Context builder inject `recent7Days stats + primaryBranch + upcoming shifts` vào system prompt. History 20 messages gần nhất + persist vào `ai_chat_messages`. Rate limit 20/h/user.
+- **Gemini STUB mode**: không cần `GEMINI_API_KEY` — client fallback trả canned Vietnamese responses. Cho phép demo + testing trước khi provision key. Set `GEMINI_API_KEY` trong `.env` để switch sang real mode.
+- **Live SSE feed**: `GET /dashboard/live` — Redis pub/sub channel `attendance:live`. AttendanceService publish event sau tx commit (check-in + check-out). Portal `<LiveFeed>` trên `/dashboard` hiển thị 20 event gần nhất + connected badge. JWT auth qua `?access_token=` query param (EventSource không set header được).
+- **Mobile 5-tab shell**: `app/(tabs)` — Check-in, Lịch sử, Lịch, Chat AI, Profile. Chat tab dùng fetch + `ReadableStream` parse SSE (React Native không có EventSource). Profile tab: zero-tap toggle + logout.
+
 ---
 
 ## 🧠 AI workflow

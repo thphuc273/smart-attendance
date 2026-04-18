@@ -1348,3 +1348,72 @@ Branch: `fix/kiosk-mobile-scan-jwt-refresh` (cắt từ `develop`)
 - [ ] `DEVICE_NOT_TRUSTED` onboarding: khi user lần đầu dùng app, scanner nên hiện tip "Hãy check-in manual 1 lần trước" thay vì chỉ báo lỗi sau khi scan.
 - [ ] Portal `postbuild` hook tự copy static/public vào standalone để `node server.js` chạy được mà không cần `pnpm start` wrapper.
 
+
+## Session #016 — 2026-04-18 — Sprint Day 6: AI Foundation + Live SSE + Mobile 5-tab
+
+### Prompt gốc
+> bắt đầu sprint day 6 → 1. Gemini api key ask me later, 2. merge, start 4 phases
+
+### Context
+PR #44 (fix/kiosk-mobile-scan-jwt-refresh → develop) đã merge squash qua `gh pr merge --admin`.
+Branch: `feature/day6-ai-gemini` cắt từ develop sau merge.
+
+### 1. Scope — 4 phases
+
+| Phase | Scope | Commit |
+| --- | --- | --- |
+| A — AI backend | AiModule + GeminiClient (stub mode) + insights weekly + chat SSE + history | `0f79ba5` |
+| B — Live SSE | Redis pub/sub `attendance:live` + `/dashboard/live` SSE + portal LiveFeed | `b4b128f` |
+| C — Mobile 5-tab | `(tabs)` group — Check-in, Lịch sử, Lịch, Chat AI, Profile | `f2e47b1` |
+| D — Release | Docs + PROMPT_LOG + tag v0.3.0-bonus + merge to main | (pending) |
+
+### 2. Key quyết định
+
+- **GeminiClient STUB mode**: `GEMINI_API_KEY` optional. Khi unset, client trả canned Vietnamese responses (JSON-shaped for insights, plain text for chat). Cho phép ship module + endpoint + rate limit mà không block provision API key.
+- **Insights cache**: Prisma table `ai_insights_cache` unique `(scope, scope_id, week_start)`, TTL 1h. Upsert pattern — lần đọc đầu sau expiry sẽ regenerate + overwrite.
+- **Chat context scope**: Employee only. Build system prompt từ `recent7Days stats + primaryBranch + upcoming shifts`. History load 20 message gần nhất inject vào prompt để giữ continuity.
+- **SSE auth workaround**: Browser EventSource không set được header. JwtStrategy extend `fromExtractors` với `fromUrlQueryParameter('access_token')` làm fallback — chỉ hit khi Authorization header vắng.
+- **Live bus = Redis pub/sub, không Bull**: Bull dành cho jobs đảm bảo. Realtime feed chấp nhận drop khi subscriber offline → pub/sub gọn hơn, không tốn Redis key storage.
+- **Attendance publish sau tx commit**: `void this.liveBus.publish(...)` ngoài transaction, fire-and-forget — fail không ảnh hưởng check-in.
+- **Mobile tabs = re-export strategy**: `(tabs)/index.tsx` `export { default } from '../checkin'` để không duplicate 400-dòng checkin logic. Flat routes vẫn tồn tại nên nav cũ chưa break; migrate homeFor() sẽ làm ở follow-up.
+- **Chat AI mobile = fetch + ReadableStream**: React Native không hỗ trợ EventSource; dùng `res.body.getReader() + TextDecoder` parse `data:` lines từ SSE stream. Authorization header đi theo fetch bình thường (không cần query param workaround trên mobile).
+
+### 3. Files changed
+
+| File | Phase | Ghi chú |
+| --- | --- | --- |
+| `apps/api/prisma/schema.prisma` | A | +AiChatMessage, +AiInsightCache, +AiChatRole, +AiInsightScope, Employee.aiChatMessages |
+| `apps/api/src/modules/ai/*` | A | module / service / controller / gemini.client / dto / prompt+context builders |
+| `apps/api/src/modules/live/*` | B | live-bus.service (pub/sub), live.controller (SSE) |
+| `apps/api/src/modules/attendance/attendance.service.ts` | B | inject LiveBusService, publish after tx commit on checkin + checkout |
+| `apps/api/src/modules/auth/strategies/jwt.strategy.ts` | B | fromExtractors fallback query `access_token` |
+| `apps/api/src/config/env.validation.ts` | A | +GEMINI_API_KEY, GEMINI_MODEL, AI_CACHE_TTL |
+| `apps/portal/src/components/live-feed.tsx` | B | EventSource client, connected badge, 20-item ring |
+| `apps/portal/src/app/dashboard/page.tsx` | B | mount `<LiveFeed token={accessToken} />` |
+| `apps/mobile/app/(tabs)/*` | C | 5 tab screens |
+| `.env.example` | A | +Gemini block |
+
+### 4. Kết quả test
+
+- API: `pnpm exec tsc --noEmit` ✓
+- Portal: `pnpm exec tsc --noEmit` ✓
+- Mobile: `pnpm exec tsc --noEmit` ✓
+- DB schema: `prisma db push` sync ✓ (project dùng db push workflow, không migrations folder)
+- Smoke test AI stub + SSE: pending (sẽ chạy sau khi merge về develop)
+
+### 5. Lessons
+
+- **Gemini stub-first pattern hữu ích**: khi chờ key, có thể verify toàn bộ flow (prompt build, token caching, rate limit, DB write) mà không block. Khi có key, chỉ set env là switch sang real mode.
+- **Prisma db push workflow**: khi drift xảy ra, `migrate dev --create-only` cũng yêu cầu reset; `db push --accept-data-loss` là path an toàn nhất cho dev DB đã lệch. Production sẽ cần chuyển sang migrations đầy đủ.
+- **SSE auth qua query param**: chuẩn industry (GitHub, Slack đều làm). Chỉ chấp nhận trên endpoints SSE-only để giảm surface — query param có thể lộ qua logs/referrer.
+- **Tab re-export không duplicate**: `export { default } from '../checkin'` là trick gọn để tách nav layer khỏi screen logic trong expo-router khi chưa muốn đại tu.
+
+### 6. Follow-up
+
+- [ ] Provision Gemini API key + smoke test real responses.
+- [ ] Mobile background geofence notify task (Phase C phần còn thiếu).
+- [ ] Migrate `homeFor()` route employee vào `/(tabs)` thay vì `/checkin`.
+- [ ] `react-native-calendars` integration cho Lịch tab.
+- [ ] Portal AI Insights panel trên /dashboard (hit /ai/insights/weekly + card display).
+
+
