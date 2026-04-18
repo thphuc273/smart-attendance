@@ -166,6 +166,14 @@ Backend:
 - Response rotate trả `kiosk_token` plaintext **một lần**; portal hiển thị inline để copy và tự lưu vào `localStorage.kiosk_token_<branchId>` cho Kiosk View trên cùng trình duyệt.
 - Mở Kiosk View ở thiết bị khác (iPad, kiosk máy riêng): admin/manager copy `kiosk_token` rồi dán vào form setup của `/kiosk/:branchId` (form lưu token vào localStorage device đó, sau đó gửi qua header `X-Kiosk-Token` khi poll QR).
 
+**QR payload & scan UX (v0.4.2 — 2026-04-18):**
+- QR chứa **raw signed token** `v1.<base64url(branchId.bucket.nonce)>.<hmac_sig>` — mobile scanner tự base64-decode phần payload để trích `branch_id`, không cần JSON wrapper.
+- Scanner vẫn chấp nhận JSON `{ b, t }` hoặc `{ branch_id, token }` làm fallback nếu tương lai đổi format.
+- Lỗi từ `POST /attendance/qr-check-in` được hiển thị tiếng Việt theo `error.code` (`DEVICE_NOT_TRUSTED`, `BRANCH_NOT_ASSIGNED`, `INVALID_LOCATION`, `QR_ALREADY_USED_TODAY`, `QR_EXPIRED`, `RATE_LIMIT_EXCEEDED`, …).
+- Kiosk countdown ring: gradient stroke (cyan→indigo), halo glow; chuyển sang rose + pulse khi `≤ 5s` còn lại — báo hiệu user "đang refresh" trực quan.
+
+**Mobile auth UX (v0.4.2):** `ky` `afterResponse` hook trong `apps/mobile/lib/api.ts` tự gọi `POST /auth/refresh` khi nhận 401, lưu `access_token + refresh_token` mới vào SecureStore, replay request gốc. Concurrent 401s dùng chung 1 promise `refreshInFlight`. Nếu refresh fail → clear auth state (next navigation sẽ trả về login).
+
 ### 4.5 Quên check-out
 
 - Cron job 23:59 mỗi ngày:

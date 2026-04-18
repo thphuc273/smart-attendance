@@ -544,16 +544,16 @@ Rotate bucket mỗi 30s. Portal client tự fetch mỗi `refresh_every_seconds` 
 
 ### POST `/attendance/qr-check-in`
 **Role:** employee (mobile scan).
+
+Mobile scanner nhận raw token từ QR (`v1.<base64url(branchId.bucket.nonce)>.<sig>`), tự base64-decode payload để lấy `branch_id`, rồi gửi:
 ```json
-// Request
+// Request (extends CheckInDto)
 {
   "branch_id": "uuid",
-  "token": "v1.HMAC_BASE64_URL",
-  "nonce": "01JKQ...",
+  "qr_token": "v1.HMAC_BASE64_URL",
   "latitude": 10.7770,
   "longitude": 106.7010,
   "accuracy_meters": 12,
-  "selfie_base64": "data:image/jpeg;base64,...",
   "device_fingerprint": "ios-abc123",
   "platform": "ios",
   "app_version": "1.0.0"
@@ -561,12 +561,16 @@ Rotate bucket mỗi 30s. Portal client tự fetch mỗi `refresh_every_seconds` 
 // Response 201 tương tự /attendance/check-in + trigger = "qr_kiosk"
 ```
 **Errors:**
-- 401 `QR_INVALID_SIGNATURE` — HMAC sai
-- 422 `QR_EXPIRED` — token ngoài bucket ±1
-- 409 `QR_ALREADY_USED` — session hôm nay `qr_token_used_at IS NOT NULL`
-- 422 `FACE_MISMATCH` — cosine < 0.85
-- 422 `FACE_NOT_ENROLLED` — employee chưa enroll face
+- 403 `QR_BAD_SIGNATURE` — HMAC sai (secret đã rotate?)
+- 403 `QR_EXPIRED` — token ngoài bucket ±1 (~60s window)
+- 403 `QR_BRANCH_MISMATCH` — `branch_id` trong body khác branch encoded trong token
+- 403 `QR_MALFORMED` / `QR_BAD_VERSION` — format lạ
+- 403 `BRANCH_NOT_ASSIGNED` — employee không thuộc branch này
+- 404 — branch chưa có kiosk secret (chưa rotate)
+- 409 `QR_ALREADY_USED_TODAY` — session hôm nay `qr_token_used_at IS NOT NULL`
+- 422 `DEVICE_NOT_TRUSTED` — device chưa có manual check-in thành công trước đó
 - 422 `INVALID_LOCATION` — GPS ngoài geofence (QR không fallback WiFi)
+- 429 `RATE_LIMIT_EXCEEDED` — vượt 5 req/phút/IP
 
 ### PUT `/branches/:id/qr-secret`
 **Role:** admin, **manager** (scope-checked qua `BranchScopeGuard` — manager chỉ rotate được branch mình quản lý). Upsert secret (tạo mới nếu chưa có, rotate nếu đã có). Audit log bắt buộc.
@@ -622,19 +626,40 @@ Query: `?branch_id=uuid&week_start=2026-04-13`
   "conversation_id": "uuid-optional"
 }
 ```
-**Response stream:**
+**Response stream (3 event type):**
 ```
+event: tool
+data: {"tool": "get_my_stats"}
+event: message
 data: {"delta": "Tháng", "conversation_id": "uuid"}
 data: {"delta": " này bạn có"}
 data: {"delta": " 2 lần trễ"}
-data: {"delta": "..."}
 data: [DONE]
 ```
-Scope enforcement:
-- `employee` → context chỉ bao gồm dữ liệu của chính user
-- `manager` → branch mình quản lý
-- `admin` → toàn hệ thống
-- `AIGuard` reject nếu phát hiện query cross-user → trả lời "Tôi không có quyền truy cập dữ liệu của người khác"
+
+**Architecture — Gemini function calling (v0.4, Session #020):**
+Server declare 9 function tool cho Gemini, model tự quyết gọi tool nào với argument nào để trả lời chính xác thay vì đoán.
+
+| Bucket | Tool | Role tối thiểu | Mô tả |
+|---|---|---|---|
+| self | `get_my_attendance_stats(date_from, date_to)` | employee | Aggregate chấm công của chính user trong khoảng ngày VN |
+| self | `get_my_recent_sessions(limit)` | employee | N phiên gần nhất của chính user |
+| self | `get_my_streak()` | employee | Chuỗi ngày đúng giờ liên tục |
+| branch | `get_branch_today_overview(branch_id)` | manager | Snapshot hôm nay của 1 chi nhánh |
+| branch | `get_branch_attendance_stats(branch_id, date_from, date_to)` | manager | Aggregate 1 chi nhánh trong khoảng ngày |
+| branch | `list_late_employees(branch_id?, date_from, date_to, limit?)` | manager | Top nhân viên trễ; manager không truyền `branch_id` → tự restrict vào `managed_branch_ids` |
+| branch | `list_absent_today(branch_id)` | manager | Danh sách nhân viên vắng hôm nay của 1 chi nhánh |
+| admin | `get_system_overview()` | admin | Tổng quan toàn hệ thống hôm nay |
+| admin | `compare_branches(date_from, date_to, limit?)` | admin | So sánh on-time rate / late / absent giữa các chi nhánh |
+
+**Scope guard 2 tầng:**
+- Tầng 1 — system prompt liệt kê role (EMPLOYEE/MANAGER/ADMIN) + `managed_branch_ids` kèm id để model biết truyền `branch_id` nào hợp lệ.
+- Tầng 2 — `ToolExecutor` re-check runtime mỗi call. Model gọi sai scope → trả `{"error": "BRANCH_OUT_OF_SCOPE"}` hoặc `{"error": "INSUFFICIENT_PERMISSION"}` → model tự xin lỗi user thay vì crash SSE.
+
+**Loop generate→execute→respond (max 6 iter):**
+1. Gemini `generateContent` (non-streaming) với `tools: [{ functionDeclarations }]` scoped theo role.
+2. Nếu response có `functionCall` parts → executor chạy tool, emit `event: tool` ra SSE cho UI hiển thị "Đang tra cứu …", append `functionResponse` vào conversation, loop lại.
+3. Khi response chỉ có `text` parts → fake-stream chunk 40 chars × 25ms ra SSE như `data: {delta}` + `[DONE]`.
 
 ### GET `/ai/chat/history`
 Query: `?limit=50&before=cursor`
@@ -652,9 +677,31 @@ Query: `?limit=50&before=cursor`
 }
 ```
 
+### DELETE `/ai/chat/history`
+**Role:** authenticated user. **Response:** `204 No Content`.
+Xoá toàn bộ lịch sử chat của chính user (`ai_chat_messages WHERE user_id = :me`) — dùng cho nút "✨ Đoạn chat mới" trên portal + mobile. Không ảnh hưởng user khác. Không rollback được.
+
 ---
 
-## 5F. Streak module
+## 5F. Streak & Geofence module
+
+### GET `/attendance/me/geofences`
+**Role:** employee. Trả danh sách geofence của primary branch + các branch được assign active, để mobile đăng ký `expo-location.startGeofencingAsync` cho tính năng **Smart Geofence Notification** (nhắc check-in khi đi vào vùng chi nhánh). Đọc qua `BranchesService.loadConfigsCached` (Redis TTL 5').
+```json
+{
+  "data": {
+    "branches": [
+      {
+        "id": "uuid",
+        "name": "HCM-Q1",
+        "geofences": [
+          { "id": "uuid", "latitude": 10.7769, "longitude": 106.7009, "radius_m": 150 }
+        ]
+      }
+    ]
+  }
+}
+```
 
 ### GET `/attendance/me/streak`
 **Role:** employee.
@@ -784,6 +831,21 @@ Stream CSV.
   }
 }
 ```
+
+### GET `/dashboard/admin/trend?days=7`
+**Role:** admin. Trend theo ngày cho biểu đồ line "Chấm công theo ngày" (Recharts) — đọc từ `daily_attendance_summaries` (groupBy `work_date + status`, pre-fill empty buckets cho ngày chưa có summary để chart không "nhảy cóc").
+```json
+{
+  "data": {
+    "days": [
+      { "date": "2026-04-12", "on_time": 4100, "late": 221, "absent": 679, "other": 12 }
+    ]
+  }
+}
+```
+
+### GET `/dashboard/manager/:branchId/trend?days=7`
+**Role:** manager (own), admin. Cùng shape `GET /dashboard/admin/trend` nhưng filter theo `branch_id`. Áp dụng JWT-first scope check (`managed_branch_ids` từ JWT) với fallback DB — align với `/dashboard/manager/:branchId`.
 
 ### GET `/dashboard/anomalies`
 **Roles:** admin, manager
@@ -986,6 +1048,7 @@ API sẽ expose `/api/docs` (Swagger UI) auto-generated từ NestJS decorators.
 
 ## 13. Changelog
 
+- **v0.5** (2026-04-18): **§5E `/ai/chat` chuyển sang Gemini function calling**. Declare 9 tool theo scope (self/branch/admin); bỏ pre-stuff stats trong system prompt; SSE emit thêm `event: tool` khi model gọi tool để UI hiển thị trạng thái tra cứu; scope guard chuyển từ `AIGuard` sang `ToolExecutor` re-check runtime trả `BRANCH_OUT_OF_SCOPE` / `INSUFFICIENT_PERMISSION` cho model xử lý.
 - **v0.4** (2026-04-17): Bỏ module **§5C Face verify** khỏi MVP. `POST /attendance/check-in` không còn nhận `selfie_base64`; `POST /attendance/qr-check-in` chỉ cần `token + latitude + longitude + device_fingerprint`. Error code `FACE_*` (§10) dời sang "out of scope". Rate limit `/employees/me/face/enroll` deprecated.
 - **v0.3** (2026-04-17): Thêm module §5C **Face verify**, §5D **QR Kiosk** (TOTP HMAC), §5E **AI Gemini** (Insights + Chat SSE), §5F **Streak**, §7.5 **Live check-in SSE**. Mở rộng body `POST /attendance/check-in` với `wifi_scan` + `selfie_base64`. Thêm 10 error code (FACE_*, QR_*, AI_*) và rate limit cho endpoint mới. Header `X-Kiosk-Token` cho kiosk auth.
 - **v0.2** (2026-04-16): Thêm module §5B zero-tap (check-in/out, settings, branch policy, admin revoke), 8 error code mới, rate limit zero-tap, header `X-Device-Attestation` + `X-Device-Fingerprint`.

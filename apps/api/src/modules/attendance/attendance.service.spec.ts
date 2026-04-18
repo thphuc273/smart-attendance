@@ -5,6 +5,7 @@ import { ScheduleService } from './schedule.service';
 import { BranchesService } from '../branches/branches.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LiveBusService } from '../live/live-bus.service';
 
 describe('AttendanceService - overrideSession', () => {
   let service: AttendanceService;
@@ -53,6 +54,10 @@ describe('AttendanceService - overrideSession', () => {
             create: jest.fn().mockResolvedValue(undefined),
             createMany: jest.fn().mockResolvedValue({ count: 0 }),
           },
+        },
+        {
+          provide: LiveBusService,
+          useValue: { publish: jest.fn() },
         },
       ],
     }).compile();

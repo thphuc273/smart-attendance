@@ -25,6 +25,7 @@ import { computeStreak, type DailyEntry, type DailyStatus } from '../../common/u
 import { ScheduleService } from './schedule.service';
 import { BranchesService } from '../branches/branches.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LiveBusService } from '../live/live-bus.service';
 
 const IMPOSSIBLE_TRAVEL_KMH = 120;
 const IMPOSSIBLE_TRAVEL_LOOKBACK_MS = 6 * 60 * 60 * 1000;
@@ -49,6 +50,7 @@ export class AttendanceService {
     private readonly scheduleService: ScheduleService,
     private readonly branchesService: BranchesService,
     private readonly notifications: NotificationsService,
+    private readonly liveBus: LiveBusService,
   ) {}
 
   private async detectImpossibleTravel(
@@ -84,6 +86,7 @@ export class AttendanceService {
       where: { userId: employeeUserId },
       include: {
         primaryBranch: true,
+        user: { select: { fullName: true } },
         assignments: {
           where: {
             effectiveFrom: { lte: new Date() },
@@ -338,6 +341,18 @@ export class AttendanceService {
       });
     }
 
+    void this.liveBus.publish({
+      type: 'check_in',
+      employee_id: employee.id,
+      employee_name: employee.user.fullName,
+      branch_id: branchId,
+      branch_name: matchedBranch?.name ?? 'Unknown',
+      session_id: result.sessionId,
+      at: (result.checkInAt ?? new Date()).toISOString(),
+      status: sessionStatus,
+      method: trustResult.method,
+    });
+
     return {
       session_id: result.sessionId,
       event_id: result.event.id,
@@ -357,6 +372,7 @@ export class AttendanceService {
     // 1. Find employee
     const employee = await this.prisma.employee.findUnique({
       where: { userId: employeeUserId },
+      include: { user: { select: { fullName: true } } },
     });
     if (!employee) {
       throw new UnprocessableEntityException({
@@ -553,6 +569,18 @@ export class AttendanceService {
       });
     }
 
+    void this.liveBus.publish({
+      type: 'check_out',
+      employee_id: employee.id,
+      employee_name: employee.user.fullName,
+      branch_id: branch?.id ?? session.branchId,
+      branch_name: branch?.name ?? 'Unknown',
+      session_id: result.session.id,
+      at: (result.session.checkOutAt ?? new Date()).toISOString(),
+      status: result.session.status,
+      method: trustResult.method,
+    });
+
     return {
       session_id: result.session.id,
       event_id: result.event.id,
@@ -609,6 +637,43 @@ export class AttendanceService {
   }
 
   // ─── STREAK ────────────────────────────────────────────────
+
+  async getMyGeofences(employeeUserId: string) {
+    const employee = await this.prisma.employee.findUnique({
+      where: { userId: employeeUserId },
+      include: {
+        primaryBranch: { select: { id: true, name: true } },
+        assignments: {
+          where: {
+            effectiveFrom: { lte: new Date() },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
+          },
+          include: { branch: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!employee) return { branches: [] };
+
+    const branchMap = new Map<string, { id: string; name: string }>();
+    branchMap.set(employee.primaryBranchId, employee.primaryBranch);
+    for (const a of employee.assignments) {
+      branchMap.set(a.branchId, a.branch);
+    }
+
+    const configs = await this.branchesService.loadConfigsCached(Array.from(branchMap.keys()));
+    return {
+      branches: configs.map((b) => ({
+        id: b.id,
+        name: b.name,
+        geofences: b.geofences.map((g) => ({
+          id: g.id,
+          latitude: Number(g.centerLat),
+          longitude: Number(g.centerLng),
+          radius_m: g.radiusMeters,
+        })),
+      })),
+    };
+  }
 
   async getMyStreak(employeeUserId: string) {
     const employee = await this.prisma.employee.findUniqueOrThrow({

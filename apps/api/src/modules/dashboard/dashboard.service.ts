@@ -121,12 +121,25 @@ export class DashboardService {
     };
   }
 
-  async getManagerBranchDashboard(branchId: string, managerUserId: string, isSuperAdmin: boolean) {
+  async getManagerBranchDashboard(
+    branchId: string,
+    managerUserId: string,
+    isSuperAdmin: boolean,
+    jwtManagedBranchIds: string[] = [],
+  ) {
     if (!isSuperAdmin) {
-      const managed = await this.prisma.managerBranch.findUnique({
-        where: { userId_branchId: { userId: managerUserId, branchId } },
-      });
-      if (!managed) throw new NotFoundException('Branch not found or outside your scope');
+      // Check JWT scope first (cheap, matches what the user sees in /branches).
+      // Fall back to a fresh DB lookup so that a just-granted assignment works
+      // without forcing the user to re-login, while a revoked assignment still
+      // blocks access once their JWT is refreshed.
+      let inScope = jwtManagedBranchIds.includes(branchId);
+      if (!inScope) {
+        const managed = await this.prisma.managerBranch.findUnique({
+          where: { userId_branchId: { userId: managerUserId, branchId } },
+        });
+        inScope = !!managed;
+      }
+      if (!inScope) throw new NotFoundException('Branch not found or outside your scope');
     }
     // Scope check stays outside cache; payload is identical per branch+day so key on branch+day.
     return this.memoize(
@@ -418,6 +431,74 @@ export class DashboardService {
       earliest_today: earliestToday,
       most_on_time_30d: mostOnTime,
       most_late_30d: mostLate,
+    };
+  }
+
+  async getAdminTrend(days: number) {
+    const today = todayInVN();
+    const from = new Date(today);
+    from.setUTCDate(from.getUTCDate() - (days - 1));
+    return this.memoize(
+      `dashboard:admin:trend:${days}:${today.toISOString().slice(0, 10)}`,
+      () => this.computeTrend(from, today, null),
+    );
+  }
+
+  async getManagerTrend(
+    branchId: string,
+    managerUserId: string,
+    isSuperAdmin: boolean,
+    jwtManagedBranchIds: string[],
+    days: number,
+  ) {
+    if (!isSuperAdmin) {
+      let inScope = jwtManagedBranchIds.includes(branchId);
+      if (!inScope) {
+        const managed = await this.prisma.managerBranch.findUnique({
+          where: { userId_branchId: { userId: managerUserId, branchId } },
+        });
+        inScope = !!managed;
+      }
+      if (!inScope) throw new NotFoundException('Branch not found or outside your scope');
+    }
+    const today = todayInVN();
+    const from = new Date(today);
+    from.setUTCDate(from.getUTCDate() - (days - 1));
+    return this.memoize(
+      `dashboard:manager:${branchId}:trend:${days}:${today.toISOString().slice(0, 10)}`,
+      () => this.computeTrend(from, today, branchId),
+    );
+  }
+
+  private async computeTrend(from: Date, to: Date, branchId: string | null) {
+    const rows = await this.prisma.dailyAttendanceSummary.groupBy({
+      by: ['workDate', 'status'],
+      where: {
+        workDate: { gte: from, lte: to },
+        ...(branchId ? { branchId } : {}),
+      },
+      _count: { _all: true },
+    });
+
+    // Build a Map<iso_day, {on_time, late, absent, other}>
+    const buckets: Record<string, { on_time: number; late: number; absent: number; other: number }> = {};
+    const cursor = new Date(from);
+    while (cursor <= to) {
+      buckets[cursor.toISOString().slice(0, 10)] = { on_time: 0, late: 0, absent: 0, other: 0 };
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    for (const r of rows) {
+      const day = r.workDate.toISOString().slice(0, 10);
+      if (!buckets[day]) continue;
+      const count = r._count._all;
+      if (r.status === 'on_time') buckets[day].on_time += count;
+      else if (r.status === 'late') buckets[day].late += count;
+      else if (r.status === 'absent') buckets[day].absent += count;
+      else buckets[day].other += count;
+    }
+
+    return {
+      days: Object.entries(buckets).map(([date, v]) => ({ date, ...v })),
     };
   }
 

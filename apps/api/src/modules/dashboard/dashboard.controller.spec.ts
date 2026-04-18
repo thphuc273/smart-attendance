@@ -28,15 +28,15 @@ describe('DashboardController', () => {
   });
 
   it('manager dashboard treats admin role as super-admin', async () => {
-    const user = { id: 'u1', roles: [RoleCode.admin] } as any;
+    const user = { id: 'u1', roles: [RoleCode.admin], managedBranchIds: [] } as any;
     await controller.getManagerDashboard(user, 'branch-1');
-    expect(dashboard.getManagerBranchDashboard).toHaveBeenCalledWith('branch-1', 'u1', true);
+    expect(dashboard.getManagerBranchDashboard).toHaveBeenCalledWith('branch-1', 'u1', true, []);
   });
 
   it('manager dashboard treats manager-only role as non-super-admin', async () => {
-    const user = { id: 'u1', roles: [RoleCode.manager] } as any;
+    const user = { id: 'u1', roles: [RoleCode.manager], managedBranchIds: ['b1'] } as any;
     await controller.getManagerDashboard(user, 'branch-1');
-    expect(dashboard.getManagerBranchDashboard).toHaveBeenCalledWith('branch-1', 'u1', false);
+    expect(dashboard.getManagerBranchDashboard).toHaveBeenCalledWith('branch-1', 'u1', false, ['b1']);
   });
 
   it('anomalies endpoint passes role scope to service', async () => {

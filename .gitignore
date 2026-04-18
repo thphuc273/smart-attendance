@@ -50,6 +50,13 @@ android/app/build/
 *.key
 *.mobileprovision
 
+# Expo prebuild output (regenerable via `npx expo prebuild --clean`)
+apps/mobile/ios/
+apps/mobile/android/
+
+# Local tooling
+.claude/
+
 # Prisma
 apps/api/prisma/*.db
 apps/api/prisma/*.db-journal

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearAuth, getStoredUser, isAdmin, isManager, type ApiUser } from '../lib/api';
 import { NotificationBell } from './notification-bell';
+import { ChatWidget } from './chat-widget';
 
 type Role = 'admin' | 'manager' | 'employee';
 
@@ -18,6 +19,7 @@ const NAV_ITEMS: { href: string; label: string; icon: string; role?: Role }[] = 
   { href: '/schedules', label: 'Ca làm', icon: '⏰', role: 'admin' },
   { href: '/branches', label: 'Chi nhánh', icon: '🏢', role: 'admin' },
   { href: '/audit-logs', label: 'Audit', icon: '🔍', role: 'admin' },
+  { href: '/chat', label: 'Trợ lý AI', icon: '🤖' },
 ];
 
 /**
@@ -192,6 +194,13 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
 
       {/* Main content */}
       <div className="flex-1 min-w-0">{children}</div>
+
+      {/* Role-scoped chatbot — mounted only when user is authenticated */}
+      {user && (
+        <ChatWidget
+          userLabel={`${isAdmin(user) ? 'Admin' : isManager(user) ? 'Manager' : 'Nhân viên'} • ${user.full_name}`}
+        />
+      )}
     </div>
   );
 }

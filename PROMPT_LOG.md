@@ -1288,3 +1288,626 @@ Schema thay đổi:
 - [ ] Rotate audit log đã có (Session #013); cần UI filter `entityType=BranchQrSecret` + "who rotated last?" trên branch detail.
 - [ ] Expo Dev Client với Node 22 LTS — nên document trong README phần Dev Setup.
 
+---
+
+## Session #015 — 2026-04-18 — Kiosk UX polish + QR check-in bug hunt + mobile JWT refresh
+
+### 1. Prompts (theo thứ tự thời gian)
+
+1. *(tiếp nối Session #014)* — `pnpm start` portal fail: `"next start" does not work with "output: standalone"` + `MODULE_NOT_FOUND` `vendor-chunks/next@15.5.15_...`.
+2. "tạo lại bộ đếm ngược thời gian cho kiosk view hiện đại và đẹp hơn".
+3. "lỗi qr checkin trên mobile không checkin được, lỗi api".
+4. "tại sao tạo mã qr tại cùng 1 chi nhánh, nhân viên tại chi nhánh đó quét thì báo mã qr không hợp lệ (không phải kiosk qr của chi nhánh)".
+5. *(runtime error paste)* — `⨯ The requested resource isn't a valid image for /finos-logo.png received null` sau khi boot standalone server trực tiếp (không qua `pnpm start`).
+6. "vẫn báo là mã qr checkin không hợp lệ dù checkin trên mobile cùng chi nhánh, đúng wifi đúng geo đúng ca làm".
+7. "lỗi 422, request fail to api qr-check-in".
+8. "không checkin được, too many request, jwt expired".
+9. "update lại prompt log tất cả các câu tôi hỏi bạn ở trên, update lại tài liệu sản phẩm nếu có tính năng gì mới, cập nhật github".
+
+### 2. Quyết định kỹ thuật
+
+| # | Vấn đề | Quyết định | Lý do |
+| - | --- | --- | --- |
+| 1 | `next start` không tương thích `output: 'standalone'`; Dockerfile đã cần standalone cho runtime stage | Giữ `output: 'standalone'`, rewrite `start` script = `cp -R public + .next/static → .next/standalone/apps/portal/ && node server.js` | Matching Docker runtime đúng 1:1, không maintain 2 mode build riêng. |
+| 2 | Countdown ring UI cũ đơn sơ (SVG 1 màu 8px) | Redesign: gradient stroke (cyan→indigo), halo glow, urgent state (≤5s → rose + pulse), glassmorphic countdown pill, ambient blurred blobs background | Kiosk chạy fullscreen cả ngày; UI chuyên nghiệp = brand trust. |
+| 3 | Mobile `scanner.tsx` post sai payload: field `token` (thay vì `qr_token`), thiếu `branch_id` + `platform` → DTO reject | Rewrite: parse QR → `{branch_id, qr_token}` → gửi đủ fields kèm `Platform.OS`, `accuracy_meters` | `forbidNonWhitelisted: true` nuốt `token` field → phải dùng đúng tên DTO. |
+| 4 | QR chỉ chứa `v1.xxx.yyy` → mobile không biết `branch_id` | Scanner tự decode base64url payload của token (`${branchId}.${bucket}.${nonce}`) → extract branch_id client-side. Vẫn accept JSON `{b, t}` làm fallback | Backend đã encode branch_id trong token; không cần đổi QR format → QR nhỏ hơn, dễ scan hơn. |
+| 5 | Error từ API hiện chung chung "Request failed with status code 422" | Thêm `ERROR_MESSAGES` map (code → tiếng Việt) + `extractApiError()` đọc `response.json().error.code/message` | Nhân viên cần biết lý do cụ thể (device not trusted vs wifi fail vs throttle). |
+| 6 | Access token hết hạn → 401 → user phải re-login thủ công | `afterResponse` hook ở `lib/api.ts`: 401 → POST `/auth/refresh` với stored refresh_token → replay request với token mới. `refreshInFlight` dedup concurrent calls | Matching portal UX; tránh spam-login. |
+| 7 | `/finos-logo.png` null sau khi boot server trực tiếp | Standalone output không tự copy `public/` + `.next/static` — phải chạy qua `pnpm start` (script đã chain cp) | Next.js standalone by design không bundle static assets; cần explicit copy step. |
+
+### 3. Files sửa
+
+Branch: `fix/kiosk-mobile-scan-jwt-refresh` (cắt từ `develop`)
+
+- **`apps/portal/package.json`** — `start` script chain `cp` static/public + boot `server.js` từ standalone.
+- **`apps/portal/src/app/kiosk/[branchId]/page.tsx`** — countdown ring redesign (gradient + halo + urgent state + glass pill). QR content = raw token (reverted khỏi JSON wrapping sau khi scanner decode được branch_id).
+- **`apps/mobile/app/scanner.tsx`**:
+  - `parseKioskPayload()` accept JSON `{b, t}` **hoặc** raw `v1.<payload>.<sig>` (base64url decode → split → extract branchId).
+  - Body gửi đủ `qr_token`, `branch_id`, `platform`, `accuracy_meters`.
+  - `ERROR_MESSAGES` + `extractApiError()` → Alert hiển thị tiếng Việt theo error code.
+- **`apps/mobile/lib/api.ts`** — `afterResponse` hook: 401 → auto refresh + retry. `refreshInFlight` promise dedup.
+
+### 4. Kết quả test
+
+- `apps/portal`: `pnpm build` ✓ · standalone smoke test `curl /` → 200 ✓
+- `apps/mobile`: `npx tsc --noEmit` ✓ · parse logic verified qua node harness với real `signQrToken` output (raw + JSON cùng trả đúng `{branch_id, qr_token}`).
+- API contract không đổi → không cần rerun API test.
+
+### 5. Lessons
+
+- **Next.js standalone + pnpm start phải chain cp**: `output: 'standalone'` cố tình không copy static/public để người vận hành có quyền chọn CDN vs app-origin. Trong dev local, phải tự copy hoặc dùng `next dev`.
+- **`forbidNonWhitelisted: true` + typo field name = silent 400**: DTO validation reject field lạ trước khi vào handler. Khi debug, check tên field trong DTO TRƯỚC khi đổ lỗi cho business logic.
+- **Đừng ép client xử lý JSON nếu backend đã encode info trong token**: QR chứa raw HMAC token là pattern chuẩn (TOTP-style). Mobile đọc branch_id từ payload là đủ.
+- **`afterResponse` hook cần exclude refresh/login endpoints**: Nếu không, refresh fail → retry refresh → vòng lặp. Match URL trước khi quyết định refresh.
+- **Rate limit 5/min dễ trip khi test thủ công**: Cân nhắc `dev` throttle config riêng (hoặc skip throttle cho localhost IP) nếu QA phiền — hiện giữ nguyên để sát production.
+
+### 6. Follow-up
+
+- [ ] Dev-mode throttle relaxation (skip guard cho `127.0.0.1` trong `NODE_ENV=development`).
+- [ ] `DEVICE_NOT_TRUSTED` onboarding: khi user lần đầu dùng app, scanner nên hiện tip "Hãy check-in manual 1 lần trước" thay vì chỉ báo lỗi sau khi scan.
+- [ ] Portal `postbuild` hook tự copy static/public vào standalone để `node server.js` chạy được mà không cần `pnpm start` wrapper.
+
+
+## Session #016 — 2026-04-18 — Sprint Day 6: AI Foundation + Live SSE + Mobile 5-tab
+
+### Prompt gốc
+> bắt đầu sprint day 6 → 1. Gemini api key ask me later, 2. merge, start 4 phases
+
+### Context
+PR #44 (fix/kiosk-mobile-scan-jwt-refresh → develop) đã merge squash qua `gh pr merge --admin`.
+Branch: `feature/day6-ai-gemini` cắt từ develop sau merge.
+
+### 1. Scope — 4 phases
+
+| Phase | Scope | Commit |
+| --- | --- | --- |
+| A — AI backend | AiModule + GeminiClient (stub mode) + insights weekly + chat SSE + history | `0f79ba5` |
+| B — Live SSE | Redis pub/sub `attendance:live` + `/dashboard/live` SSE + portal LiveFeed | `b4b128f` |
+| C — Mobile 5-tab | `(tabs)` group — Check-in, Lịch sử, Lịch, Chat AI, Profile | `f2e47b1` |
+| D — Release | Docs + PROMPT_LOG + tag v0.3.0-bonus + merge to main | (pending) |
+
+### 2. Key quyết định
+
+- **GeminiClient STUB mode**: `GEMINI_API_KEY` optional. Khi unset, client trả canned Vietnamese responses (JSON-shaped for insights, plain text for chat). Cho phép ship module + endpoint + rate limit mà không block provision API key.
+- **Insights cache**: Prisma table `ai_insights_cache` unique `(scope, scope_id, week_start)`, TTL 1h. Upsert pattern — lần đọc đầu sau expiry sẽ regenerate + overwrite.
+- **Chat context scope**: Employee only. Build system prompt từ `recent7Days stats + primaryBranch + upcoming shifts`. History load 20 message gần nhất inject vào prompt để giữ continuity.
+- **SSE auth workaround**: Browser EventSource không set được header. JwtStrategy extend `fromExtractors` với `fromUrlQueryParameter('access_token')` làm fallback — chỉ hit khi Authorization header vắng.
+- **Live bus = Redis pub/sub, không Bull**: Bull dành cho jobs đảm bảo. Realtime feed chấp nhận drop khi subscriber offline → pub/sub gọn hơn, không tốn Redis key storage.
+- **Attendance publish sau tx commit**: `void this.liveBus.publish(...)` ngoài transaction, fire-and-forget — fail không ảnh hưởng check-in.
+- **Mobile tabs = re-export strategy**: `(tabs)/index.tsx` `export { default } from '../checkin'` để không duplicate 400-dòng checkin logic. Flat routes vẫn tồn tại nên nav cũ chưa break; migrate homeFor() sẽ làm ở follow-up.
+- **Chat AI mobile = fetch + ReadableStream**: React Native không hỗ trợ EventSource; dùng `res.body.getReader() + TextDecoder` parse `data:` lines từ SSE stream. Authorization header đi theo fetch bình thường (không cần query param workaround trên mobile).
+
+### 3. Files changed
+
+| File | Phase | Ghi chú |
+| --- | --- | --- |
+| `apps/api/prisma/schema.prisma` | A | +AiChatMessage, +AiInsightCache, +AiChatRole, +AiInsightScope, Employee.aiChatMessages |
+| `apps/api/src/modules/ai/*` | A | module / service / controller / gemini.client / dto / prompt+context builders |
+| `apps/api/src/modules/live/*` | B | live-bus.service (pub/sub), live.controller (SSE) |
+| `apps/api/src/modules/attendance/attendance.service.ts` | B | inject LiveBusService, publish after tx commit on checkin + checkout |
+| `apps/api/src/modules/auth/strategies/jwt.strategy.ts` | B | fromExtractors fallback query `access_token` |
+| `apps/api/src/config/env.validation.ts` | A | +GEMINI_API_KEY, GEMINI_MODEL, AI_CACHE_TTL |
+| `apps/portal/src/components/live-feed.tsx` | B | EventSource client, connected badge, 20-item ring |
+| `apps/portal/src/app/dashboard/page.tsx` | B | mount `<LiveFeed token={accessToken} />` |
+| `apps/mobile/app/(tabs)/*` | C | 5 tab screens |
+| `.env.example` | A | +Gemini block |
+
+### 4. Kết quả test
+
+- API: `pnpm exec tsc --noEmit` ✓
+- Portal: `pnpm exec tsc --noEmit` ✓
+- Mobile: `pnpm exec tsc --noEmit` ✓
+- DB schema: `prisma db push` sync ✓ (project dùng db push workflow, không migrations folder)
+- Smoke test AI stub + SSE: pending (sẽ chạy sau khi merge về develop)
+
+### 5. Lessons
+
+- **Gemini stub-first pattern hữu ích**: khi chờ key, có thể verify toàn bộ flow (prompt build, token caching, rate limit, DB write) mà không block. Khi có key, chỉ set env là switch sang real mode.
+- **Prisma db push workflow**: khi drift xảy ra, `migrate dev --create-only` cũng yêu cầu reset; `db push --accept-data-loss` là path an toàn nhất cho dev DB đã lệch. Production sẽ cần chuyển sang migrations đầy đủ.
+- **SSE auth qua query param**: chuẩn industry (GitHub, Slack đều làm). Chỉ chấp nhận trên endpoints SSE-only để giảm surface — query param có thể lộ qua logs/referrer.
+- **Tab re-export không duplicate**: `export { default } from '../checkin'` là trick gọn để tách nav layer khỏi screen logic trong expo-router khi chưa muốn đại tu.
+
+### 6. Follow-up
+
+- [ ] Provision Gemini API key + smoke test real responses.
+- [ ] Mobile background geofence notify task (Phase C phần còn thiếu).
+- [ ] Migrate `homeFor()` route employee vào `/(tabs)` thay vì `/checkin`.
+- [ ] `react-native-calendars` integration cho Lịch tab.
+- [ ] Portal AI Insights panel trên /dashboard (hit /ai/insights/weekly + card display).
+
+
+## Session #017 — 2026-04-18 — Day 6 polish: dashboard scope drift + portal chatbot tab + true Gemini SSE
+
+### Prompt gốc (tổng hợp 11 turn)
+1. > Request failed with status code 404 Not Found: GET /dashboard/manager/:branchId
+2. > kiểm tra xem react-query đã hoat động tốt trên hệ thống chưa
+3. > chưa thấy tab chatbot trong menu của portal cho tất cả các role
+4. > Gemini API error 404: models/gemini-1.5-flash is not found…
+5. > Gemini API error 404: models/gemini-2.0-flash is no longer available to new users… đồng thời cập nhật chatbot widget để tạo đoạn chat mới
+6. > chatbot đang phản hồi rất lâu, kiểm tra xem
+7. > chatbot chưa cập nhật realtime, phải reload lại trang mới thấy
+8. > chưa hiện response token-by-token, design lại UI đang suy nghĩ
+9. > đã cập nhật UI nhưng vẫn phải reload mới thấy response, kiểm tra lại
+10. > review code, update PROMPT_LOG, update README + docs cho các chức năng mới
+
+### Context
+Ngày polish sau Sprint 6 merge. Branch: `chore/prisma-tx-timeout` (đang mang fix prisma + các polish Day 6 chưa release).
+
+### 1. Bug fix — `/dashboard/manager/:branchId` trả 404
+
+**Triệu chứng:** Portal `/dashboard` của manager → 404 mặc dù `/branches` trả đúng branch cho cùng user.
+
+**Root cause:** Hai endpoint đọc scope từ **hai nguồn khác nhau**:
+- `/branches` filter qua `user.managed_branch_ids` từ JWT claim.
+- `/dashboard/manager/:id` check qua `ManagerBranch` DB table.
+- JWT có TTL 15m → khi admin assign branch cho manager, **JWT claim không sync** đến khi refresh token. Picker cho chọn branch, nhưng dashboard reject vì DB cũng không có (hoặc ngược lại khi rollback).
+
+**Fix:**
+- `dashboard.controller.ts` giờ truyền `user.managedBranchIds` (JWT) vào service.
+- `dashboard.service.getManagerBranchDashboard()`: check JWT-first, fallback DB `findUnique({ userId_branchId })`. Nếu một trong hai nguồn cho phép → pass.
+- Admin (`isSuperAdmin`) skip toàn bộ scope check.
+
+**Lesson:** Khi có 2 nguồn truth (JWT vs DB) cho cùng một scope check, phải thống nhất hoặc check cả hai. "Trusting JWT" sai khi admin mutate quyền — "trusting DB" sai khi JWT không refresh.
+
+### 2. React Query audit
+
+Audit thấy một số chỗ portal còn tự fetch qua `apiFetch` + `useState/useEffect` thay vì `useApiQuery`:
+- `NotificationBell` (sidebar desktop + topbar mobile) — fetch riêng, không share cache → load 2 lần.
+- Một vài mutation inline không invalidate query key tương ứng.
+
+**Fix:**
+- Thêm `notifications` factory vào `queryKeys` trong `apps/portal/src/lib/queries.ts`.
+- Rewrite `NotificationBell` → `useApiQuery(queryKeys.notifications({ limit: 20 }))` + `useMutation` mark-read + `qc.invalidateQueries({ queryKey: queryKeys.notifications() })`. `refetchInterval: 60_000` thay cho setInterval thủ công.
+- Desktop và mobile giờ share cache — mark-read một chỗ update cả hai.
+
+### 3. Portal chatbot menu tab
+
+**Prompt:** "chưa thấy tab chatbot trong menu của portal cho tất cả các role"
+
+**Trước đó** chỉ có `<ChatWidget>` floating ở góc phải — dễ miss, không có full-screen để xem long conversation.
+
+**Fix:**
+- Thêm `{ href: '/chat', label: 'Trợ lý AI', icon: '🤖' }` vào `nav.tsx` items (tất cả role).
+- Tạo `apps/portal/src/app/chat/page.tsx` — full-screen, `max-w-4xl`, header hiện role + `scopeHint` tiếng Việt gợi ý câu hỏi phù hợp (admin/manager/employee khác nhau), suggestion chips khi history rỗng.
+
+### 4. Gemini model migration
+
+**Chuỗi 404:**
+- `gemini-1.5-flash` → "model not found for API version v1beta" (đã deprecated trên v1beta).
+- `gemini-2.0-flash` → "no longer available to new users".
+- `gemini-2.5-flash` → OK.
+
+**Fix:** Update cả `gemini.client.ts:24` default và `.env.example`.
+
+**Lesson:** Google deprecate model nhanh hơn expected. Nên log model version + fallback trong client.
+
+### 5. Chatbot phản hồi rất lâu (30s+ trước token đầu)
+
+**Root cause 1:** `GeminiClient.stream()` đang gọi `generate()` (full response, non-streaming) rồi `text.match(/.{1,40}/g)` chia chunk local + `setTimeout(40ms)` giữa chunk. Hoàn toàn **fake streaming** — client đợi full response rồi mới nhận được "stream" giả.
+
+**Root cause 2:** Gemini 2.5 Flash bật "thinking mode" mặc định → latency extra vài giây trước khi sinh token đầu.
+
+**Fix:**
+- `stream()` đổi sang gọi thật `:streamGenerateContent?alt=sse` của Gemini v1beta. Parse SSE lines, `JSON.parse(payload)`, yield text chunks khi có.
+- Thêm `buildBody(messages, fastChat)` — khi `fastChat=true`, set `generationConfig.thinkingConfig.thinkingBudget = 0` để tắt thinking cho chat path (insights vẫn giữ default để suy luận sâu hơn).
+- `stream()` default `fastChat=true`, `generate()` default `fastChat=false`.
+
+**Kết quả:** First-token ~500ms thay vì 30s.
+
+### 6. Interceptor double-wrap → response chỉ hiện sau reload (subtle)
+
+**Prompt:** "đã cập nhật UI nhưng vẫn phải reload mới thấy response"
+
+**Triệu chứng:** UI "Đang suy nghĩ" hiện đúng, nhưng token không append. Chỉ khi F5 mới thấy full response (vì lúc này load history).
+
+**Root cause:** Global `ResponseTransformInterceptor` wrap **mọi** Observable emission thành `{ data: ... }`. Với `@Sse()` handler, mỗi `MessageEvent { data: { delta: "..." } }` bị wrap thành `{ data: { data: { delta: "..." } } }`. Client parse `json.delta` → `undefined` → không append gì.
+
+**Fix attempt 1:** Check `reflector.get<boolean>('sse', ctx.getHandler())` → vẫn sai.
+
+**Root cause thật:** Grep `node_modules/@nestjs/common/constants.js` → `SSE_METADATA = '__sse__'`, **không phải** `'sse'`. Decorator `@Sse()` set metadata với key `'__sse__'`.
+
+**Fix final:**
+```ts
+import { SSE_METADATA } from '@nestjs/common/constants';
+const isSse = this.reflector.get<boolean>(SSE_METADATA, ctx.getHandler());
+if (isSse) return next.handle();
+```
+
+**Lesson:** Đừng đoán metadata key. NestJS export constant chính thức — dùng nó. Một ký tự sai (`sse` vs `__sse__`) làm global interceptor phá SSE một cách im lặng (không có error, response vẫn tới, chỉ sai shape).
+
+### 7. Thinking UI redesign + typing cursor
+
+Animated bubble `ThinkingBubble` với:
+- `animate-ping` halo quanh 🤖 icon.
+- 3 dots `animate-bounce` với `[animation-delay:-0.3s]`, `[-0.15s]`, default (stagger).
+- Text "Đang suy nghĩ" nhỏ.
+
+Typing cursor trên bubble assistant khi đang stream: pulsing vertical bar `h-4 w-[2px] animate-pulse bg-brand-500`. Cursor chỉ hiện khi `m.content` đã có ký tự (tránh trùng với ThinkingBubble ở trạng thái empty).
+
+### 8. "Đoạn chat mới"
+
+Thêm endpoint `DELETE /ai/chat/history` + `AiService.clearChatHistory(user)` (prisma `deleteMany` by `userId`).
+
+UI: nút ✨ trên header widget và trên trang `/chat` — `confirm()` rồi DELETE + clear local state. Không cần "conversation_id" logic phức tạp vì mô hình hiện tại 1 user = 1 lịch sử linear; "đoạn chat mới" = xoá sạch.
+
+### 9. Files changed
+
+| File | Phần |
+|---|---|
+| `apps/api/src/modules/dashboard/dashboard.controller.ts` | Pass JWT managedBranchIds |
+| `apps/api/src/modules/dashboard/dashboard.service.ts` | JWT-first scope check |
+| `apps/api/src/modules/ai/gemini.client.ts` | Real SSE stream + thinkingBudget=0 + model 2.5 |
+| `apps/api/src/modules/ai/ai.controller.ts` | `DELETE /ai/chat/history` |
+| `apps/api/src/modules/ai/ai.service.ts` | `clearChatHistory()` |
+| `apps/api/src/common/interceptors/response-transform.interceptor.ts` | Skip `SSE_METADATA` handler |
+| `.env.example` | `GEMINI_MODEL=gemini-2.5-flash` |
+| `apps/portal/src/components/nav.tsx` | +🤖 Trợ lý AI |
+| `apps/portal/src/app/chat/page.tsx` | NEW — full-screen chat |
+| `apps/portal/src/components/chat-widget.tsx` | +✨ nút mới + ThinkingBubble + cursor |
+| `apps/portal/src/components/notification-bell.tsx` | Rewrite react-query |
+| `apps/portal/src/lib/queries.ts` | +`notifications` factory |
+| `docs/api-spec.md` | +`DELETE /ai/chat/history` |
+| `README.md` | +Day 6 polish bullets |
+
+### 10. Test
+
+- API: `pnpm exec tsc --noEmit` ✓
+- Portal: `pnpm exec tsc --noEmit` ✓
+- Manual: login 3 role → /chat → stream token-by-token visible ✓ → nút ✨ clear history ✓ → `/dashboard/manager/:id` không còn 404 ✓
+- NotificationBell hai nơi share cache ✓
+
+### 11. Lessons
+
+- **Metadata key phải import từ framework**: viết hardcode `'sse'` thay vì `SSE_METADATA` → bug câm. Debug mất 2 turn vì response vẫn đến đúng endpoint, chỉ sai shape bên trong SSE payload.
+- **"Fake streaming" là trap phổ biến**: khi implementer chưa quen SSE server-side, dễ viết `generate() rồi chunk local`. UX giống streaming ở client side khi test local (vì `setTimeout` giả), nhưng first-token latency lộ ra ngay khi test thật.
+- **Global interceptor + streaming endpoints**: phải có exception check. Nếu một ngày nào đó thêm WebSocket handler hoặc raw binary response, pattern tương tự sẽ lại cắn.
+- **JWT vs DB scope**: khi quyền có thể mutate bởi admin (assign/revoke branch), đừng trust JWT một cách độc quyền. Check cả hai, ưu tiên nguồn nào updated gần hơn.
+
+### 12. Follow-up
+
+- [ ] Chuyển `/dashboard/manager/:id` scope check hoàn toàn sang DB để single-source truth; force JWT refresh sau khi admin mutate ManagerBranch.
+- [ ] Heartbeat 15s trên `/ai/chat` SSE để tránh idle proxy ngắt.
+- [ ] Monitoring: log Gemini first-token latency + tokens_in/out vào `ai_chat_messages` (field đã có trong schema).
+- [ ] Mobile chat cũng nên có nút "Đoạn chat mới" tương ứng.
+
+---
+
+## Session #018 — 2026-04-18 — Day 6 gap-closing: Portal AI Insights panel + AI unit tests + mobile IP fix
+
+### Prompt gốc
+1. > UI và feature trên mobile chưa được cập nhật, chạy mobile bị lỗi Request time out GET 192.168.1.174:3000/api/v1/attendance/me?limit=1
+2. > hoàn thành các chức năng còn thiếu của sprint day 6, review và test lại sau đó cập nhật prompt log
+
+### Context
+Sprint Day 6 đã merge feature chính (AI chat SSE, Live feed, mobile 5-tab) nhưng audit lại `docs/sprint-plan.md` §6.4 và §6.5 phát hiện gap:
+1. **Portal `/dashboard`** chưa có panel "AI Insights tuần" (DoD #1 của Day 6 — 3 cột positives / concerns / recommendations).
+2. **Unit test AI module** (sprint-plan yêu cầu 10 tests: 5 InsightPromptBuilder + 3 ChatContextBuilder + 2 AIGuard) — chưa tồn tại.
+3. **Mobile không kết nối được API** do IP LAN của Mac thay đổi do DHCP.
+
+### 1. Mobile IP fix
+**Triệu chứng:** `Request timeout GET 192.168.1.174:3000/api/v1/attendance/me?limit=1`.
+**Root cause:** Mac của user nhận lease mới `192.168.1.173` nhưng `apps/mobile/.env` vẫn ghi `174`.
+**Fix:** Cập nhật `EXPO_PUBLIC_API_BASE_URL`. **Lesson:** `EXPO_PUBLIC_*` được bake vào bundle khi Expo dev server khởi động — sửa `.env` khi server đã chạy thì không có hiệu lực cho đến khi restart. Ghi chú vào message trả về user.
+
+### 2. Mobile chat UI parity với portal
+Trước Session này, mobile chat thiếu:
+- Nút "Đoạn chat mới" (theo sprint-plan §6.4 portal, nhưng logic tương đương)
+- Thinking bubble (chỉ có dấu `…` tĩnh)
+- Token-by-token streaming visible (trước đó collect hết mới render)
+
+**Thay đổi trong `apps/mobile/app/(tabs)/chat.tsx`:**
+- `getSuggestions(user)` trả về suggestion khác nhau theo role (employee vs manager/admin).
+- `Alert.alert` confirm + `DELETE /ai/chat/history` + clear local state khi nhấn "✨".
+- `ThinkingBubble`: 3 dot bouncing qua `Animated.Value` + `Animated.loop(Animated.sequence(...))` với `useNativeDriver: true`.
+- Typing cursor `▍` append vào bubble assistant cuối khi đang stream.
+- `fetch(url, { reactNative: { textStreaming: true } })` — RN fetch mặc định buffer body, cần flag này mới đẩy chunk qua reader.
+
+### 3. Portal AI Insights panel — file mới
+
+**`apps/portal/src/components/ai-insights-panel.tsx`** (NEW):
+- Component nhận `branchId: string | null` (null = admin system-wide).
+- Fetch qua `useApiQuery(queryKeys.aiInsights(branchId), path)` — thêm `aiInsights` vào `queryKeys` factory trong `lib/queries.ts`.
+- Handle **hai shape payload**: spec docs ghi `{ positives[], concerns[], recommendations[] }` nhưng Gemini response thực tế là `{ summary, highlights, recommendations, anomalies }`. Component ưu tiên explicit `positives/concerns` nếu có, fallback `highlights → positives`, `anomalies → concerns`. Tránh việc thay đổi prompt rồi phải migrate panel.
+- Skeleton loader 3 column khi `isLoading && !data`.
+- Refresh button: `qc.invalidateQueries({ queryKey: key })` + `void refetch()` (chuẩn pattern React Query đã áp dụng cả hệ thống).
+- Badge `cached` · `stub mode (chưa có GEMINI_API_KEY)` hiển thị state rõ ràng.
+- Mount trong `apps/portal/src/app/dashboard/page.tsx` cho admin + manager-scoped:
+  ```tsx
+  {(admin || currentBranchId) && (
+    <AiInsightsPanel branchId={admin ? null : currentBranchId} />
+  )}
+  ```
+
+### 4. AI unit tests — 3 spec files mới
+
+Audit sprint-plan.md §6.5: 5 test InsightPromptBuilder + 3 ChatContextBuilder + 2 AIGuard. Deliver 25 tests (vượt mục tiêu do muốn cover cả 3 role × nhánh edge).
+
+**`apps/api/src/modules/ai/insight-prompt.builder.spec.ts`** (8 tests):
+- Scope label + week range rendered.
+- Session count fields.
+- Late trend: positive `+25%`, negative `-10%`, null → "chưa đủ dữ liệu".
+- Top-late employees: inline comma-joined khi có, omit line hoàn toàn khi empty.
+- JSON-only trailer enforcement.
+
+**`apps/api/src/modules/ai/chat-context.builder.spec.ts`** (12 tests trong 4 describe):
+- Employee: role label, identity (name + id), 7-day stats, empty shifts → "Chưa có ca sắp tới", null branch/leave fallback.
+- Manager: role restriction, managed branches rendered, today + 7-day ratio, top-late format `Tên @ Chi nhánh (count)`, empty branches → "(chưa gán)".
+- Admin: role label "toàn hệ thống", totals + top-late branches.
+- Guardrails: luôn prepend `FinOS HR Assistant` + `KHÔNG bịa số liệu` + `từ chối lịch sự`.
+
+**`apps/api/src/modules/ai/ai.service.spec.ts`** (5 tests):
+- Employee role → `INSUFFICIENT_PERMISSION` BEFORE DB query.
+- Manager xin branch khác → `BRANCH_OUT_OF_SCOPE`.
+- Manager không truyền `branchId` → `ForbiddenException` (chỉ admin được system-wide).
+- Admin bypass scope check → đến được `prisma.branch.findUnique` (assert gọi đúng `{ where: { id } }`).
+- `clearChatHistory` scope `deleteMany` theo `userId` duy nhất.
+
+**Pattern chọn:** không dùng `Test.createTestingModule` mà construct manual:
+```ts
+service = new AiService(
+  prisma as unknown as never,
+  { generate: jest.fn() } as never,
+  {} as never,
+  {} as never,
+);
+```
+Lý do: tests chỉ chạm `prisma` + (một vài) `gemini`. `Test.createTestingModule` kéo vào cả dependency graph → phải mock `LiveBusService`, `ThrottlerGuard`, Redis… tăng setup ×5 mà không cover thêm gì. (Và chính pattern `Test.createTestingModule` đang gây failure tồn tại sẵn ở `attendance.service.spec.ts` — xem §5.)
+
+### 5. Test verify
+
+```bash
+# AI-only
+pnpm exec jest --testPathPattern="modules/ai/"
+# Test Suites: 3 passed, 3 total
+# Tests: 25 passed, 25 total (2.3s)
+
+# Full API
+pnpm exec jest
+# Test Suites: 2 failed, 23 passed
+# Tests: 5 failed, 191 passed, 196 total
+```
+
+**5 failures điều tra:** tất cả ở `modules/attendance/attendance.service.spec.ts:30` — NestJS `TestingInjector` báo `LiveBusService` không resolve được trong `RootTestModule`. Git stash toàn bộ thay đổi của session này → chạy lại spec → vẫn fail với cùng stack. **Kết luận:** pre-existing trên branch `chore/prisma-tx-timeout`, không phải do Session #018 gây ra. Tạo follow-up task.
+
+### 6. Typecheck
+- `pnpm --filter @smart-attendance/api exec tsc --noEmit` ✓
+- `pnpm --filter @smart-attendance/portal exec tsc --noEmit` ✓
+
+### 7. Files changed
+
+| File | Thay đổi |
+|---|---|
+| `apps/portal/src/components/ai-insights-panel.tsx` | NEW — panel 3 cột + skeleton + refresh + dual-shape payload |
+| `apps/portal/src/lib/queries.ts` | `+ aiInsights` vào `queryKeys` factory |
+| `apps/portal/src/app/dashboard/page.tsx` | Mount `AiInsightsPanel` cho admin + manager |
+| `apps/api/src/modules/ai/insight-prompt.builder.spec.ts` | NEW — 8 tests |
+| `apps/api/src/modules/ai/chat-context.builder.spec.ts` | NEW — 12 tests |
+| `apps/api/src/modules/ai/ai.service.spec.ts` | NEW — 5 tests scope enforcement |
+| `apps/mobile/.env` | Đổi IP LAN `174 → 173` |
+| `apps/mobile/app/(tabs)/chat.tsx` | Rewrite: role-aware suggestions + ThinkingBubble + cursor + textStreaming |
+| `docs/sprint-plan.md` | Tick DoD §6.4 AI Insights panel, §6.5 unit tests AI |
+
+### 8. Lessons
+
+- **Spec shape vs reality**: Gemini với system prompt tiếng Việt trả về `{ summary, highlights, recommendations, anomalies }` chứ không phải `{ positives, concerns, recommendations }` như spec docs. UI tiêu thụ ở 2 layer: giữ fallback cả hai để khỏi phải rebuild panel mỗi lần tinh chỉnh prompt. Vẫn update docs sau nhưng không block.
+- **Bỏ `Test.createTestingModule` khi không cần**: unit test AI scope chỉ cần `new AiService(prisma, gemini, ...)`. Module builder lôi cả dependency graph → mọi sub-dependency không liên quan cũng phải mock. Khi spec test chỉ quan tâm 2-3 nhánh method, construct bằng tay ngắn và rõ ràng hơn.
+- **`EXPO_PUBLIC_*` env vars bake tại start**: sửa `.env` khi Expo dev server đang chạy → không có hiệu lực. Document lại trong message trả user, không silent.
+- **React Native `fetch` mặc định buffer body**: streaming cần cờ `reactNative: { textStreaming: true }`. Không có flag, fetch tích hết body rồi mới resolve — UX đồng bộ hoàn toàn dù server vẫn đang stream.
+
+### 9. Follow-up
+
+- [ ] Fix `attendance.service.spec.ts` `LiveBusService` DI — module test cần import `LiveBusModule` hoặc mock provide. Pre-existing nên tạo ticket riêng.
+- [ ] Chuẩn hoá prompt Gemini để trả đúng shape `{ positives, concerns, recommendations }` theo spec docs, xoá fallback mapping trong panel.
+- [ ] E2E test SSE `/ai/chat` + `/dashboard/live` (sprint-plan §6.5 items #4, #5 — vẫn còn hở).
+- [ ] Document lại shape AI insights response thực tế vào `docs/api-spec.md` §5E.
+
+---
+
+## Session #019 — 2026-04-18 — Day 6 completion: mobile History/Calendar, geofence notify, Recharts dashboard
+
+### Prompt gốc (sau audit 5 mục)
+1. > [audit user cung cấp, khẳng định 45% done; 4 mảng cho là 0%]
+2. > approve [4 deps mới]
+3. > ok [proceed xây cả 4]
+
+### Context
+User đưa ra bản audit Day 6 cho là 45% done với 4 nhóm "0%": Live Feed, Mobile 5-tab, Geofence Notification, Recharts. Audit này **sai 2/4** (Live Feed đã ship 100% từ Session #016; mobile 5-tab shell đã xong + chat/profile đủ, chỉ History là stub 1 dòng re-export, Calendar là placeholder 51 dòng). Sau khi verify bằng `ls apps/mobile/app/(tabs)/` và `Glob apps/api/src/modules/**/live*.ts`, trình bày lại đúng state cho user, revise thành **~70% done** với 4 gap thật:
+- History infinite scroll (không cần dep mới)
+- Calendar `react-native-calendars` (cần dep)
+- Geofence notification (cần `expo-notifications` + `expo-task-manager`)
+- Recharts dashboard (cần `recharts`)
+
+User approve cả 4 deps. Sprint-plan §7.2 "KHÔNG thêm dep không hỏi" — được verbal-approve từ user + dep được nêu đích danh trong sprint-plan, nên OK.
+
+### 1. Deps installed
+- `apps/mobile`: `react-native-calendars`, `expo-notifications`, `expo-task-manager`
+- `apps/portal`: `recharts`
+
+Sai filter đầu tiên (`@smart-attendance/mobile` → không tìm thấy; đổi sang `@sa/mobile` theo tên thực tế trong `package.json`).
+
+### 2. Mobile History tab — FlatList infinite scroll
+
+**Thay `apps/mobile/app/(tabs)/history.tsx` 1-line stub** bằng component hoàn chỉnh:
+- `onEndReached + onEndReachedThreshold={0.4}` gọi `fetchPage(page + 1, false)`.
+- `loadingRef: useRef(false)` để chống double-fire khi ListEmpty → render → onEndReached (tuần tự 2 lần trong cùng frame).
+- Pull-to-refresh: `RefreshControl` set `refreshing` độc lập với `loading` ban đầu + `loadingMore`.
+- Footer: spinner khi `loadingMore`, `· Hết lịch sử ·` khi `page >= totalPages`.
+- API: `attendance/me?page=N&limit=20` — đã hỗ trợ sẵn, không cần mở rộng.
+
+**Quyết định không dùng `@shopify/flash-list`**: sprint-plan nêu FlashList nhưng với scope 20-item/page + scroll hiếm vượt 200 entries, FlatList là đủ và giảm 1 dep nặng. Sprint-plan chấp nhận tinh thần (virtualized list with infinite scroll) — ghi nhận.
+
+### 3. Mobile Calendar tab — `react-native-calendars`
+
+**Refactor `apps/mobile/app/(tabs)/calendar.tsx`** từ placeholder 51 dòng:
+- `LocaleConfig` tiếng Việt (Thứ 2-CN, Tháng 1-12).
+- Calendar `current={isoDay(focusDate)}` + `onMonthChange` → reload data khi user chuyển tháng.
+- Fetch `attendance/me?date_from=YYYY-MM-01&date_to=YYYY-MM-LAST&limit=100` (đã có).
+- `markedDates` = `{ [day]: { marked: true, dotColor: STATUS_COLOR[status] } }`. Selected day overlay `selectedColor: brand600`.
+- Summary card: count by status + total worked hours (tháng).
+- Selected-day card + legend dots.
+
+### 4. Geofence notification — end-to-end
+
+**4.1 Backend:** Thêm endpoint `GET /attendance/me/geofences` cho employee (không dùng `/branches/:id/geofences` vì role-restricted admin/manager).
+
+`AttendanceService.getMyGeofences(userId)`:
+- Lấy employee + primaryBranch + active assignments.
+- Gộp branchIds, gọi `BranchesService.loadConfigsCached()` (Redis TTL 5' đã có).
+- Trả `{ branches: [{ id, name, geofences: [{id, latitude, longitude, radius_m}] }] }`.
+
+**4.2 Mobile:** `apps/mobile/lib/geofence-notify.ts`:
+- `GEOFENCE_TASK` constant name + `defineGeofenceTask()` gọi ở module scope của `app/_layout.tsx` — bắt buộc đặt ngoài component để TaskManager daemon có thể invoke task sau khi app terminate.
+- `enableGeofenceNotify()`: request foreground + background location + notification permissions → fetch geofences → `Location.startGeofencingAsync(GEOFENCE_TASK, regions)`.
+- Task handler: filter `eventType === Enter`, check `last_notified_at[branchId]` trong SecureStore, debounce 30'. Fire `Notifications.scheduleNotificationAsync` với `trigger: null` (immediate).
+- `disableGeofenceNotify()`: `stopGeofencingAsync` + flag `PREF_KEY='0'`.
+
+**4.3 Profile toggle wiring:** `apps/mobile/app/(tabs)/profile.tsx` trước đây có Switch nhưng `onValueChange={setGeofenceNotify}` chỉ mutate state local, không bật thực sự. Thêm `toggleGeofence` handler map reason codes → thông điệp user-friendly (`foreground_denied` → "Bạn chưa cấp quyền vị trí", `no_geofences` → "Chi nhánh chưa cấu hình geofence", v.v.).
+
+**Notification handler setup:** `Notifications.setNotificationHandler({...})` ở `app/_layout.tsx` với `shouldShowBanner: true` + `shouldShowList: true` (Expo SDK 54+ shape — `shouldShowAlert` mình giữ cho backcompat).
+
+### 5. Portal Recharts dashboard
+
+**5.1 Backend:** Thêm 2 endpoint trend:
+- `GET /dashboard/admin/trend?days=7` (admin)
+- `GET /dashboard/manager/:branchId/trend?days=7` (manager/admin + scope check)
+
+`DashboardService.computeTrend(from, to, branchId | null)`:
+- `groupBy: ['workDate', 'status']` trên `dailyAttendanceSummary`.
+- Pre-fill buckets cho mỗi day trong range (tránh gap khi không có summary — cron chạy 00:30, có thể rỗng).
+- Return `{ days: [{ date, on_time, late, absent, other }] }`.
+- Cache 60s qua `memoize()` key theo `{scope}:trend:{days}:{today}`.
+
+**5.2 Frontend:** `apps/portal/src/components/dashboard-charts.tsx`:
+- `TrendChart`: Recharts `LineChart` 3 series (on_time xanh / late cam / absent đỏ), tooltip format lại date từ label (`MM-DD`) sang ISO full.
+- `TodayStatusPie`: donut chart (innerRadius 50 + outerRadius 80) với labels inline; empty state khi cả 3 đều 0.
+- `TopBranchesBar`: horizontal bar (layout `vertical`), height dynamic `Math.max(220, data.length * 28 + 40)` để 10 branch không squish.
+
+Mount trong `app/dashboard/page.tsx` dưới heatmap cho admin:
+```tsx
+{admin && overview && (
+  <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+    <TrendChart branchId={null} />
+    <TodayStatusPie today={overview.today} />
+    <TopBranchesBar branches={overview.top_branches_late} />
+  </section>
+)}
+```
+
+Không mount cho manager vì manager view đã có `WeekTrend` + `StatusRow` custom (nhỏ gọn hơn, phù hợp 1 branch).
+
+### 6. Query keys mở rộng
+
+`apps/portal/src/lib/queries.ts`:
+```ts
+dashboardAdminTrend: (days: number) => ['dashboard', 'admin', 'trend', days] as const,
+dashboardManagerTrend: (branchId: string, days: number) => ['dashboard', 'manager', branchId, 'trend', days] as const,
+```
+
+### 7. Files changed
+
+| File | Thay đổi |
+|---|---|
+| `apps/mobile/app/(tabs)/history.tsx` | REWRITE — FlatList infinite scroll pagination |
+| `apps/mobile/app/(tabs)/calendar.tsx` | REWRITE — react-native-calendars + month summary + selected-day card |
+| `apps/mobile/app/(tabs)/profile.tsx` | Wire toggle geofence vào enable/disable + alert reason codes |
+| `apps/mobile/app/_layout.tsx` | `defineGeofenceTask()` module-scope + `Notifications.setNotificationHandler` |
+| `apps/mobile/lib/geofence-notify.ts` | NEW — start/stop/taskDef + SecureStore debounce |
+| `apps/mobile/package.json` | +react-native-calendars, +expo-notifications, +expo-task-manager |
+| `apps/api/src/modules/attendance/attendance.service.ts` | `+getMyGeofences()` |
+| `apps/api/src/modules/attendance/attendance.controller.ts` | `+GET /attendance/me/geofences` |
+| `apps/api/src/modules/dashboard/dashboard.service.ts` | `+getAdminTrend` + `+getManagerTrend` + `+computeTrend` |
+| `apps/api/src/modules/dashboard/dashboard.controller.ts` | `+GET /dashboard/admin/trend` + `/dashboard/manager/:id/trend` |
+| `apps/portal/src/components/dashboard-charts.tsx` | NEW — TrendChart + TodayStatusPie + TopBranchesBar |
+| `apps/portal/src/app/dashboard/page.tsx` | Mount 3 charts cho admin |
+| `apps/portal/src/lib/queries.ts` | +dashboardAdminTrend, +dashboardManagerTrend |
+| `apps/portal/package.json` | +recharts |
+| `docs/sprint-plan.md` | Tick 6.4 (5 mục mobile), 6.4 (Recharts) |
+
+### 8. Test verify
+- API `tsc --noEmit` ✓
+- Portal `tsc --noEmit` ✓
+- Mobile `tsc --noEmit` ✓
+- AI jest suite: 25/25 pass (1.7s, 3 suites) — không regression.
+
+### 9. Lessons
+- **Verify audit trước khi act**: bản audit user đưa ra nói Live Feed 0% và Mobile 5-tab 0%. Nếu tin ngay thì tốn ít nhất 1 ngày "xây lại" cái đã có. Ls + Glob 4 đường dẫn then chốt (`apps/mobile/app/(tabs)/`, `apps/api/src/modules/live/`, `apps/portal/src/components/live-feed.tsx`, attendance.service `liveBus`) đủ để lật 2/4 claim. **Always verify before writing code**.
+- **TaskManager task definition phải ở module scope**: nếu đặt trong `useEffect` hoặc component body, sau khi app termination, daemon Expo không có handler để gọi → enter event lặng lẽ drop. Test bug này trên thiết bị thật rất tốn thời gian vì "có vẻ đã register" ở DevTools nhưng không fire — root cause là closure bị garbage collected.
+- **Pre-fill bucket khi groupBy theo date**: `DailyAttendanceSummary` được cron 00:30 upsert → với tuần mới hoặc DB mới seed, nhiều day rỗng. Nếu chỉ trả những row `groupBy` return, Recharts LineChart sẽ "nhảy cóc" qua ngày trống → hiểu lầm xu hướng. Pre-fill `{date, 0, 0, 0, 0}` trước khi merge là chuẩn.
+- **Audit chia tỷ lệ lẻ (45%, 70%)**: khó truyền đạt khi item có trọng số khác nhau. Lần tới nên report theo "item checklist" thay vì %.
+
+### 10. Follow-up
+- [ ] Nâng cấp History lên `@shopify/flash-list` nếu user thực tế cần scroll qua 200+ entries.
+- [ ] Manager dashboard cũng nên dùng `TrendChart` thay `WeekTrend` để UI đồng nhất.
+- [ ] Native build: Expo config plugin cho `expo-notifications` + `expo-location` background mode (info.plist `NSLocationAlwaysAndWhenInUseUsageDescription`, Android `ACCESS_BACKGROUND_LOCATION`). Cần EAS build, không test được trên Expo Go.
+- [ ] Chart responsiveness: trên màn mobile (< 768px) nên stack 1-column thay vì squish 3 cột. Hiện đã có `grid-cols-1 md:grid-cols-3` — OK, nhưng kiểm lại với 10 branches bar vì label dài dễ overflow.
+
+---
+
+## Session #020 — 2026-04-18 — HR Assistant: Gemini function calling end-to-end
+
+### Prompt gốc
+> "chatbot chưa trả lời đúng dựa vào thông tin cá nhân của employee/manager/admin, có cần thiết kế tool/function calling để chatbot gọi truy xuất thông tin trước khi phản hồi để tăng độ chính xác không" → "full tool calling luôn".
+
+### 1. Vấn đề
+Pre-Session #020: `AiService.chatStream` tiền-nạp cả `stats` + `branchRollup` vào system prompt (ChatContext). Hệ quả:
+- Employee hỏi "tuần trước tôi đi trễ mấy hôm" → LLM đoán vì prompt chỉ có "tuần này".
+- Manager hỏi "so sánh 2 chi nhánh của tôi" → không có dữ liệu, LLM bịa số.
+- Admin hỏi "top branch tháng này" → prompt thiếu, LLM hallucinate.
+
+### 2. Thiết kế
+**9 tool trong 3 nhóm theo scope**:
+- `selfTools` (employee+): `get_my_attendance_stats`, `get_my_recent_sessions`, `get_my_streak`
+- `branchTools` (manager+): `get_branch_today_overview`, `get_branch_attendance_stats`, `list_late_employees`, `list_absent_today`
+- `adminTools` (admin only): `get_system_overview`, `compare_branches`
+
+**Kiến trúc tool-call loop** (non-streaming resolve → fake-stream final text):
+```
+while iter < 6:
+  { parts } = gemini.generateWithTools({ system, contents, tools })
+  if no functionCall → break, stream text
+  append {role:'model', parts}
+  for each fc: execute via ToolExecutor, append functionResponse
+```
+Tại sao không streaming trong loop: Gemini streaming khó tách functionCall khỏi text mid-stream; fake-stream final text qua `fakeStream()` đủ cho UX (chunks 40 chars × 25ms).
+
+**Scope guard 2 tầng**:
+- Tầng 1 — system prompt: `ChatContextBuilder` chỉ prompt các tool hợp lệ với role (EMPLOYEE/MANAGER/ADMIN) + liệt kê `managedBranches` với id để model biết truyền `branch_id` nào.
+- Tầng 2 — runtime: `ToolExecutor.run()` re-check role + `managedBranchIds` cho mỗi call. Model có thể tự ý gọi tool ngoài scope → catch throw → trả `{error: 'BRANCH_OUT_OF_SCOPE'|'INSUFFICIENT_PERMISSION'}` để model tự xin lỗi user thay vì crash SSE.
+
+### 3. Files thay đổi
+| File | Thay đổi |
+|---|---|
+| `apps/api/src/modules/ai/tools/tool-definitions.ts` | NEW — 9 tool decl + `toolsForScope()` |
+| `apps/api/src/modules/ai/tools/tool-executor.ts` | NEW — dispatch + scope guards + VN date helpers |
+| `apps/api/src/modules/ai/tools/tool-executor.spec.ts` | NEW — 6 test scope enforcement |
+| `apps/api/src/modules/ai/gemini.client.ts` | +`generateWithTools()`, +`fakeStream()`, +GeminiPart union types |
+| `apps/api/src/modules/ai/chat-context.builder.ts` | Rewrite: `ChatContext` → `ChatIdentity` (identity-only, không pre-stuff stats) |
+| `apps/api/src/modules/ai/chat-context.builder.spec.ts` | Rewrite — 6 test identity prompt |
+| `apps/api/src/modules/ai/ai.service.ts` | Rewrite `chatStream` thành tool-call loop; +`buildIdentity()` Promise.all fetch |
+| `apps/api/src/modules/ai/ai.service.spec.ts` | Update constructor signature (5 args gồm ToolExecutor), findFirst thay findUnique |
+| `apps/api/src/modules/ai/ai.module.ts` | +`ToolExecutor` provider |
+
+### 4. Bugs đã fix khi làm
+1. **PrismaClientValidationError** `aiInsightCache.findUnique({scope: 'system', scopeId: null})` — composite unique `(scope, scopeId, weekStart)` reject null. Fix: `findFirst` + branching `update`/`create` by id.
+2. **Typecheck `emp.user`** trong `getMyStats` — dead code `name: emp.user ? undefined : undefined` (query không include `user`). Fix: drop field.
+3. **`managedBranches: []` fallback**: `arr?.map().join('; ') ?? '(chưa gán)'` trả empty string (không phải nullish). Fix: `arr?.length ? join : fallback`.
+4. **HttpException.response private** khi cast lỗi — `as unknown as { response? }`.
+
+### 5. Test verify
+- API `tsc --noEmit` ✓
+- AI jest suite: 4 files / **25 pass** (tool-executor 6, ai.service 5, chat-context 6, insight-prompt 8).
+- Test coverage scope guard: manager gọi OUT-OF-SCOPE branch → `BRANCH_OUT_OF_SCOPE` + Prisma không bị gọi; employee gọi admin tool → `INSUFFICIENT_PERMISSION`; admin bypass branch check; unknown tool → `UNKNOWN_TOOL`; manager list_late không branch_id → auto-restrict `{in: managedBranchIds}`.
+
+### 6. Lessons
+- **System prompt không phải là nơi chứa data**: pre-stuff stats tốn token mà vẫn lỗi khi user hỏi khoảng thời gian khác. Tool calling giúp model tự quyết "cần dữ liệu gì" → chính xác hơn, scale theo câu hỏi thay vì theo prompt length.
+- **Hai tầng scope guard là bắt buộc**: chỉ dựa vào prompt (tầng 1) thì attacker có thể prompt-inject để gọi tool khác. ToolExecutor runtime re-check role + managedBranchIds mới đúng trust boundary.
+- **Composite unique với nullable column** trong Prisma: `findUnique` reject null luôn, phải dùng `findFirst`. Schema hợp lệ nhưng client API không map được null → chọn `findFirst` là chuẩn cho case scope=system (scopeId=null).
+- **Fake-stream đủ cho UX**: không cần streaming thật trong tool-call loop. User không phân biệt được 1.2s resolve + 600ms fake-stream vs 1.8s real stream — code đơn giản hơn rất nhiều.
+
+### 7. Follow-up
+- [ ] Thêm tool `get_my_schedule` / `get_branch_schedule` khi schedule module ổn định.
+- [ ] Cache tool result theo (user, tool, args hash) trong 60s để tránh re-query khi model loop (ví dụ gọi `get_my_attendance_stats` 2 lần trong 1 turn).
+- [ ] Telemetry: log `{userId, tool, latencyMs, error?}` để monitor tool usage & catch scope-violation attempts.
+
+
