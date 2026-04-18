@@ -129,6 +129,7 @@ model User {
   auditLogs       AuditLog[]
   managedBranches ManagerBranch[]
   notifications   Notification[]
+  aiChatMessages  AiChatMessage[]
 
   @@index([status])
   @@map("users")
@@ -234,7 +235,6 @@ model Employee {
   scheduleAssigns WorkScheduleAssignment[]
   sessions        AttendanceSession[]
   dailySummaries  DailyAttendanceSummary[]
-  aiChatMessages  AiChatMessage[]
 
   @@index([primaryBranchId])
   @@index([departmentId])
@@ -549,10 +549,12 @@ enum AiChatRole {
   system
 }
 
-/// Chat history for AI HR Assistant (employee scope).
+/// Chat history for AI HR Assistant — keyed per user so admins/managers
+/// without an Employee record can chat too. Scope of data exposed to the
+/// LLM is enforced in service (by role + managedBranchIds).
 model AiChatMessage {
   id             String     @id @default(uuid()) @db.Uuid
-  employeeId     String     @map("employee_id") @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
   conversationId String?    @map("conversation_id") @db.Uuid
   role           AiChatRole
   content        String     @db.Text
@@ -560,9 +562,9 @@ model AiChatMessage {
   tokensOut      Int?       @map("tokens_out")
   createdAt      DateTime   @default(now()) @map("created_at")
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([employeeId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("ai_chat_messages")
 }
 

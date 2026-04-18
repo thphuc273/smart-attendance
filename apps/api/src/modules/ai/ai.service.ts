@@ -5,7 +5,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { GeminiClient, GeminiMessage } from './gemini.client';
 import { InsightPromptBuilder, InsightStats } from './insight-prompt.builder';
-import { ChatContextBuilder, EmployeeContext } from './chat-context.builder';
+import {
+  AdminContext,
+  ChatContext,
+  ChatContextBuilder,
+  EmployeeContext,
+  ManagerContext,
+} from './chat-context.builder';
 
 const INSIGHT_TTL_MS = 60 * 60 * 1000;
 
@@ -175,9 +181,8 @@ export class AiService {
   // ---------- Chat ----------
 
   async getChatHistory(user: AuthenticatedUser, limit = 50) {
-    const employee = await this.getEmployeeForUser(user.id);
     const rows = await this.prisma.aiChatMessage.findMany({
-      where: { employeeId: employee.id },
+      where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
       take: Math.min(limit, 200),
     });
@@ -194,10 +199,9 @@ export class AiService {
       let closed = false;
       const run = async () => {
         try {
-          const employee = await this.getEmployeeForUser(user.id);
-          const ctx = await this.buildEmployeeContext(employee.id);
+          const ctx = await this.buildContextForUser(user);
           const history = await this.prisma.aiChatMessage.findMany({
-            where: { employeeId: employee.id },
+            where: { userId: user.id },
             orderBy: { createdAt: 'desc' },
             take: 20,
           });
@@ -210,7 +214,7 @@ export class AiService {
           ];
 
           await this.prisma.aiChatMessage.create({
-            data: { employeeId: employee.id, role: AiChatRole.user, content: message },
+            data: { userId: user.id, role: AiChatRole.user, content: message },
           });
 
           let full = '';
@@ -221,7 +225,7 @@ export class AiService {
           }
 
           await this.prisma.aiChatMessage.create({
-            data: { employeeId: employee.id, role: AiChatRole.assistant, content: full },
+            data: { userId: user.id, role: AiChatRole.assistant, content: full },
           });
 
           subscriber.next({ data: { done: true }, type: 'done' } as MessageEvent);
@@ -241,28 +245,31 @@ export class AiService {
     });
   }
 
-  private async getEmployeeForUser(userId: string) {
-    const employee = await this.prisma.employee.findFirst({ where: { userId } });
-    if (!employee) throw new NotFoundException({ code: 'EMPLOYEE_NOT_FOUND' });
-    return employee;
+  private async buildContextForUser(user: AuthenticatedUser): Promise<ChatContext> {
+    const isAdmin = user.roles.includes(RoleCode.admin);
+    const isManager = user.roles.includes(RoleCode.manager);
+    if (isAdmin) return this.buildAdminContext(user);
+    if (isManager) return this.buildManagerContext(user);
+    return this.buildEmployeeContext(user);
   }
 
-  private async buildEmployeeContext(employeeId: string): Promise<EmployeeContext> {
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: employeeId },
+  private async buildEmployeeContext(user: AuthenticatedUser): Promise<EmployeeContext> {
+    const employee = await this.prisma.employee.findFirst({
+      where: { userId: user.id },
       include: { primaryBranch: { select: { name: true } }, user: { select: { fullName: true } } },
     });
     if (!employee) throw new NotFoundException({ code: 'EMPLOYEE_NOT_FOUND' });
 
     const since = new Date(Date.now() - 7 * 86_400_000);
     const sessions = await this.prisma.attendanceSession.findMany({
-      where: { employeeId, checkInAt: { gte: since } },
+      where: { employeeId: employee.id, checkInAt: { gte: since } },
       select: { status: true, checkOutAt: true },
     });
 
     return {
-      employeeId,
-      fullName: employee.user.fullName,
+      scope: 'employee',
+      userFullName: employee.user.fullName,
+      employeeId: employee.id,
       primaryBranchName: employee.primaryBranch?.name ?? null,
       recent7Days: {
         sessions: sessions.length,
@@ -274,4 +281,139 @@ export class AiService {
       remainingLeaveDays: null,
     };
   }
+
+  private async buildManagerContext(user: AuthenticatedUser): Promise<ManagerContext> {
+    const branchIds = user.managedBranchIds;
+    const branches = branchIds.length
+      ? await this.prisma.branch.findMany({
+          where: { id: { in: branchIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+
+    const todayStart = startOfVNToday();
+    const todayEnd = addDays(todayStart, 1);
+    const weekAgo = addDays(todayStart, -6);
+
+    const filter = { branchId: { in: branchIds.length ? branchIds : ['00000000-0000-0000-0000-000000000000'] } };
+
+    const [todaySessions, weekSessions] = await Promise.all([
+      this.prisma.attendanceSession.findMany({
+        where: { ...filter, checkInAt: { gte: todayStart, lt: todayEnd } },
+        select: { status: true, checkOutAt: true },
+      }),
+      this.prisma.attendanceSession.findMany({
+        where: { ...filter, checkInAt: { gte: weekAgo, lt: todayEnd } },
+        select: { status: true },
+      }),
+    ]);
+
+    const topLateRaw = await this.prisma.attendanceSession.groupBy({
+      by: ['employeeId'],
+      where: { ...filter, checkInAt: { gte: weekAgo, lt: todayEnd }, status: AttendanceSessionStatus.late },
+      _count: { _all: true },
+      orderBy: { _count: { employeeId: 'desc' } },
+      take: 5,
+    });
+    const topEmps = await this.prisma.employee.findMany({
+      where: { id: { in: topLateRaw.map((r) => r.employeeId) } },
+      include: { user: { select: { fullName: true } }, primaryBranch: { select: { name: true } } },
+    });
+
+    const userRecord = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { fullName: true },
+    });
+
+    return {
+      scope: 'manager',
+      userFullName: userRecord?.fullName ?? user.email,
+      managedBranches: branches,
+      today: countToday(todaySessions),
+      last7Days: countWeek(weekSessions),
+      topLate: topLateRaw.map((r) => {
+        const emp = topEmps.find((e) => e.id === r.employeeId);
+        return {
+          name: emp?.user.fullName ?? '—',
+          branchName: emp?.primaryBranch?.name ?? '—',
+          lateCount: r._count._all,
+        };
+      }),
+    };
+  }
+
+  private async buildAdminContext(user: AuthenticatedUser): Promise<AdminContext> {
+    const todayStart = startOfVNToday();
+    const todayEnd = addDays(todayStart, 1);
+    const weekAgo = addDays(todayStart, -6);
+
+    const [employees, branches, todaySessions, weekSessions, topLateBranches] = await Promise.all([
+      this.prisma.employee.count(),
+      this.prisma.branch.count(),
+      this.prisma.attendanceSession.findMany({
+        where: { checkInAt: { gte: todayStart, lt: todayEnd } },
+        select: { status: true, checkOutAt: true },
+      }),
+      this.prisma.attendanceSession.findMany({
+        where: { checkInAt: { gte: weekAgo, lt: todayEnd } },
+        select: { status: true },
+      }),
+      this.prisma.attendanceSession.groupBy({
+        by: ['branchId'],
+        where: { checkInAt: { gte: weekAgo, lt: todayEnd }, status: AttendanceSessionStatus.late },
+        _count: { _all: true },
+        orderBy: { _count: { branchId: 'desc' } },
+        take: 5,
+      }),
+    ]);
+
+    const branchRecords = await this.prisma.branch.findMany({
+      where: { id: { in: topLateBranches.map((r) => r.branchId) } },
+      select: { id: true, name: true },
+    });
+    const userRecord = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { fullName: true },
+    });
+
+    return {
+      scope: 'admin',
+      userFullName: userRecord?.fullName ?? user.email,
+      totals: { employees, branches },
+      today: countToday(todaySessions),
+      last7Days: countWeek(weekSessions),
+      topLateBranches: topLateBranches.map((r) => ({
+        name: branchRecords.find((b) => b.id === r.branchId)?.name ?? '—',
+        lateCount: r._count._all,
+      })),
+    };
+  }
+}
+
+function startOfVNToday(): Date {
+  const nowMs = Date.now() + 7 * 3600 * 1000;
+  const vn = new Date(nowMs);
+  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate()) - 7 * 3600 * 1000);
+}
+
+function countToday(sessions: Array<{ status: AttendanceSessionStatus; checkOutAt: Date | null }>) {
+  return {
+    sessions: sessions.length,
+    onTime: sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length,
+    late: sessions.filter((s) => s.status === AttendanceSessionStatus.late).length,
+    missingCheckout: sessions.filter((s) => s.checkOutAt === null).length,
+    absent: sessions.filter((s) => s.status === AttendanceSessionStatus.absent).length,
+  };
+}
+
+function countWeek(sessions: Array<{ status: AttendanceSessionStatus }>) {
+  const total = sessions.length;
+  const onTime = sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length;
+  const late = sessions.filter((s) => s.status === AttendanceSessionStatus.late).length;
+  return {
+    sessions: total,
+    onTime,
+    late,
+    onTimeRatePct: total ? Math.round((onTime / total) * 100) : 0,
+  };
 }
