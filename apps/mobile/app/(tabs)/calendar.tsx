@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Calendar, DateData, LocaleConfig } from 'react-native-calendars';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApi, hasToken } from '../../lib/api';
 import { useRouter } from 'expo-router';
 import { colors, radius, shadow } from '../../lib/theme';
@@ -52,6 +53,7 @@ function isoDay(d: Date): string {
 
 export default function CalendarTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [focusDate, setFocusDate] = useState(() => new Date());
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<string>(() => isoDay(new Date()));
@@ -109,7 +111,7 @@ export default function CalendarTab() {
 
   return (
     <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 40 }}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>Lịch làm việc</Text>
         <Text style={styles.subtitle}>
           {focusDate.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
@@ -203,7 +205,6 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   header: {
     padding: 20,
-    paddingTop: 56,
     backgroundColor: colors.surface,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,

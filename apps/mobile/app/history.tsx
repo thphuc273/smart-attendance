@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApi, getStoredUser, hasToken, type StoredUser } from '../lib/api';
 import { colors, radius, shadow, statusTone } from '../lib/theme';
 
@@ -40,6 +41,7 @@ function vnDateString(d: Date): string {
 
 export default function HistoryScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<StoredUser | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +80,7 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
           <Text style={styles.backText}>← Quay lại</Text>
         </Pressable>
@@ -139,7 +141,7 @@ function SessionRow({ session }: { session: Session }) {
           <Text style={styles.timeValue}>{outTime}</Text>
         </View>
       </View>
-      {(session.lateMinutes || session.overtimeMinutes) && (
+      {!!(session.lateMinutes || session.overtimeMinutes) && (
         <View style={styles.deltaRow}>
           {session.lateMinutes ? (
             <View style={[styles.deltaPill, { backgroundColor: colors.amber100 }]}>
@@ -169,7 +171,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    paddingTop: 56,
     backgroundColor: colors.surface,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,

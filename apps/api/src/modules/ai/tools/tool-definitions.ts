@@ -21,7 +21,7 @@ const selfTools: ToolDecl[] = [
   {
     name: 'get_my_attendance_stats',
     description:
-      'Thống kê chấm công CỦA CHÍNH NGƯỜI HỎI trong một khoảng ngày (phiên, đúng giờ, muộn, vắng, thiếu check-out, overtime, tỉ lệ đúng giờ). Dùng khi người dùng hỏi "tuần này / tháng này / từ ngày X tới ngày Y tôi đi trễ bao nhiêu lần, đi làm mấy ngày".',
+      'Thống kê chấm công CỦA CHÍNH NGƯỜI HỎI trong một khoảng ngày (phiên, đúng giờ, muộn, về sớm/early_leave, vắng, thiếu check-out, overtime, tỉ lệ đúng giờ, tổng giờ làm). Dùng khi người dùng hỏi "tuần này / tháng này / từ ngày X tới ngày Y tôi đi trễ / về sớm bao nhiêu lần, đi làm mấy ngày".',
     parameters: {
       type: 'object',
       properties: {

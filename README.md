@@ -41,6 +41,11 @@
   - 📊 **Realtime dashboard** — live SSE feed, leaderboard, trend 7/30 ngày, anomaly board.
   - 📱 **Multi-platform** — NestJS backend + Next.js portal + Expo React Native mobile, chia sẻ contract qua OpenAPI.
 
+- **Video demo**
+  - 📱 [Mobile — Employee](https://litter.catbox.moe/r5hlyv4fddpdqsml.mp4)
+  - 💼 [Portal — Employee](https://litter.catbox.moe/q3ydyo4pqvxlzpca.mp4)
+  - 🛠️ [Portal — Admin](https://litter.catbox.moe/nui2heq49aqx9zku.mp4)
+
 ---
 
 ## 2. Tính năng — Admin / Manager Portal (Next.js)

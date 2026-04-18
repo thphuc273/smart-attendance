@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { defineGeofenceTask } from '../lib/geofence-notify';
 
 // Background task must be defined at module scope, before any component mounts,
@@ -18,10 +19,13 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   return (
-    <Stack
-      screenOptions={{
-        headerTitleStyle: { fontWeight: '600' },
-      }}
-    />
+    <SafeAreaProvider>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          headerTitleStyle: { fontWeight: '600' },
+        }}
+      />
+    </SafeAreaProvider>
   );
 }
