@@ -1,197 +1,327 @@
-# Smart Attendance
+<p align="center">
+  <img src="finos-smart-attendance.png" alt="FinOS Smart Attendance" width="420" />
+</p>
 
-Hệ thống chấm công thông minh cho doanh nghiệp **100 chi nhánh × 5.000 nhân viên**.
-Check-in/out qua GPS geofencing + WiFi SSID/BSSID, **Trust Score**, **Anomaly Dashboard**, và tính năng flagship: **Zero-tap check-in** (nhân viên không mở app, không chạm — hệ thống tự check-in khi vào vùng chi nhánh).
-
-> 5-day AI-assisted build. Stack: NestJS + Prisma + PostgreSQL 16 + Redis · Expo + React Native (mobile) · Next.js 15 (portal) · pnpm workspaces · Docker Compose.
+<p align="center">
+  <img src="https://img.shields.io/badge/-TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/-Node.js%2020%2F22-339933?logo=node.js&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/-NestJS%2010-E0234E?logo=nestjs&logoColor=white" alt="NestJS" />
+  <img src="https://img.shields.io/badge/-Next.js%2015-000000?logo=next.js&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/-React%2019-20232A?logo=react&logoColor=61DAFB" alt="React" />
+  <img src="https://img.shields.io/badge/-Expo%20SDK%2054-000020?logo=expo&logoColor=white" alt="Expo" />
+  <img src="https://img.shields.io/badge/-React%20Native%200.81-20232A?logo=react&logoColor=61DAFB" alt="React Native" />
+  <img src="https://img.shields.io/badge/-Prisma%206-2D3748?logo=prisma&logoColor=white" alt="Prisma" />
+  <img src="https://img.shields.io/badge/-PostgreSQL%2016-316192?logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/-Redis%207-DC382D?logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/-BullMQ-EC1C24?logo=redis&logoColor=white" alt="BullMQ" />
+  <img src="https://img.shields.io/badge/-TailwindCSS-06B6D4?logo=tailwindcss&logoColor=white" alt="TailwindCSS" />
+  <img src="https://img.shields.io/badge/-TanStack%20Query-FF4154?logo=reactquery&logoColor=white" alt="TanStack Query" />
+  <img src="https://img.shields.io/badge/-Zod-3E67B1?logo=zod&logoColor=white" alt="Zod" />
+  <img src="https://img.shields.io/badge/-Gemini%202.5%20Flash-4285F4?logo=google&logoColor=white" alt="Gemini" />
+  <img src="https://img.shields.io/badge/-Docker%20Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/-pnpm%20workspaces-F69220?logo=pnpm&logoColor=white" alt="pnpm" />
+  <img src="https://img.shields.io/badge/-Jest-C21325?logo=jest&logoColor=white" alt="Jest" />
+</p>
 
 ---
 
-## 📚 Tài liệu
+## 1. Tổng quan sản phẩm
 
-| File | Mục đích |
+**Smart Attendance** là hệ thống chấm công thông minh được thiết kế cho doanh nghiệp quy mô **100 chi nhánh × 5.000 nhân viên**. Sản phẩm thay thế cách chấm công thủ công/máy vân tay bằng một pipeline **GPS + WiFi + Device attestation** kết hợp **Trust Score** và **Anomaly Detection** để vừa nhanh cho nhân viên vừa an toàn cho doanh nghiệp.
+
+- **Đối tượng sử dụng**
+  - **Nhân viên** — check-in/out chỉ bằng việc bước vào vùng chi nhánh (zero-tap) hoặc quét QR kiosk khi offline.
+  - **Manager chi nhánh** — theo dõi realtime feed, duyệt/chỉnh sửa, xem báo cáo chi nhánh.
+  - **Admin** — cấu hình branch/wifi/geofence, quản lý nhân sự, xem dashboard toàn hệ thống, AI insights.
+
+- **Giá trị cốt lõi**
+  - ⚡ **Zero-tap check-in** — chấm công tự động khi nhân viên vào vùng chi nhánh (GPS geofence + WiFi BSSID + device attestation).
+  - 🛡️ **Anti-fraud đa tầng** — phát hiện mock location, VPN, thiết bị lạ, đi kèm Trust Score 0–100 và audit log.
+  - 🤖 **AI HR Assistant (Gemini)** — weekly insights + chat với function calling (9 tools theo scope admin/manager/employee).
+  - 📊 **Realtime dashboard** — live SSE feed, leaderboard, trend 7/30 ngày, anomaly board.
+  - 📱 **Multi-platform** — NestJS backend + Next.js portal + Expo React Native mobile, chia sẻ contract qua OpenAPI.
+
+---
+
+## 2. Tính năng — Admin / Manager Portal (Next.js)
+
+| Khu vực | Chức năng chính |
 |---|---|
-| [`docs/spec.md`](docs/spec.md) | Nghiệp vụ, rule check-in, trust score, anti-fraud |
-| [`docs/erd.md`](docs/erd.md) | Database schema (Prisma) |
-| [`docs/api-spec.md`](docs/api-spec.md) | API contract + error catalog |
-| [`docs/CLAUDE.md`](docs/CLAUDE.md) | Context cho AI IDE |
-| [`docs/sprint-plan.md`](docs/sprint-plan.md) | Kế hoạch 5-day sprint (checkbox) |
-| [`PROMPT_LOG.md`](PROMPT_LOG.md) | Nhật ký làm việc với AI (tiêu chí chấm 15%) |
+| **Dashboard** (`/dashboard`) | Overview toàn hệ thống (admin) hoặc theo chi nhánh (manager): số check-in hôm nay, on-time/late/absent, leaderboard, trend 7 ngày, live feed (SSE). |
+| **Employees** (`/employees`) | CRUD nhân viên, gán chi nhánh, xem device & zero-tap status, revoke device, assign work schedule. |
+| **Branches** (`/branches`) | Quản lý chi nhánh + WiFi whitelist (SSID/BSSID priority) + Geofence (center lat/lng + radius) + Zero-tap policy. |
+| **Sessions** (`/sessions`) | Xem attendance_sessions theo ngày/chi nhánh, manager override với audit trail, drill-down sang events. |
+| **Schedules** (`/schedules`) | Work schedule (giờ vào/ra, grace minutes, OT threshold, workdays), gán cho nhân viên. |
+| **Reports** (`/reports`) | Daily summary, branch report, CSV export async qua BullMQ queue, download khi job completed. |
+| **Kiosk** (`/kiosk`) | Hiển thị QR token cho branch không phủ WiFi (token rotate, chống replay). |
+| **Checkin** (`/checkin`) | Manual check-in cho desktop dev/demo. |
+| **Chat HR** (`/chat`) | Gemini-powered assistant với function calling (9 tools), scope guard 2 tầng. |
+| **Audit Logs** (`/audit-logs`) | Truy vết mọi thao tác override/revoke của admin/manager. |
 
----
+**Phân quyền (RBAC + scope-based):**
 
-## 🚀 Quick start
-
-### Yêu cầu
-- Node **20 hoặc 22 LTS** (Node 25+ phá ESM resolver của `@expo/metro` — **không dùng**)
-- pnpm 10.33
-- Docker + Docker Compose
-- Mobile dev: Expo SDK 54, Node 22 LTS khuyến nghị; pnpm cần `shamefully-hoist=true` (đã set ở `.npmrc` root) để Expo CLI resolve được metro packages
-
-### Chạy bằng Docker (1 lệnh)
-```bash
-cp .env.example .env
-docker compose up -d --build
-# → Swagger: http://localhost:3000/api/docs
-```
-
-## Quick Start (Docker)
-
-```bash
-# 1. Start Postgres & Redis
-cd /Users/phuc.nguyen/Documents/Working/FinOS/smart-attendance
-docker compose up postgres redis -d
-
-# 2. Reset and seed database (includes 7-day test data)
-./scripts/reset-db.sh
-
-# 3. Start API server
-cd apps/api
-pnpm install
-pnpm dev
-```
-
-The API will run at: `http://localhost:3000/api/docs` (Swagger UI)
-
-## Test Accounts
-
-The seed script (`scripts/reset-db.sh`) automatically creates the following test accounts. All passwords are: `*@123` with the role name capitalized (e.g., `Admin@123`).
-
-| Role | Email | Password | Scope |
-|------|-------|----------|-------|
-| **Admin** | `admin@demo.com` | `Admin@123` | Full system |
-| **Manager** | `manager.hcm@demo.com` | `Manager@123` | HCM-Q1 branch only |
-| **Employee**| `employee001@demo.com` | `Employee@123` | Self only |
-| **Employee**| `employee002@demo.com` | `Employee@123` | Self only |
-
-_Note: There are 30 employees named `employee001@demo.com` up to `employee030@demo.com`._
-
-### Portal (Next.js)
-```bash
-pnpm --filter @sa/portal dev              # http://localhost:3100
-```
-
-### Mobile (Expo)
-```bash
-pnpm --filter @sa/mobile start            # scan QR với dev client
-# Yêu cầu EAS Build dev client để test native module (zero-tap Day 5)
-```
-
----
-
-## 🔑 Tài khoản demo
-
-| Role | Email | Mật khẩu |
+| Role | Scope | Quyền điển hình |
 |---|---|---|
-| Admin | `admin@demo.com` | `Admin@123` |
-| Manager (HCM) | `manager.hcm@demo.com` | `Manager@123` (Day 2) |
-| Employee | `employee001@demo.com` | `Employee@123` (Day 2) |
+| `admin` | Toàn hệ thống | CRUD tất cả, override mọi branch, xem dashboard hệ thống, cấu hình rule |
+| `manager` | `managed_branches[]` | Xem/chỉnh sessions của branch mình, duyệt override, báo cáo chi nhánh |
+| `employee` | Cá nhân | Xem lịch sử, streak, ca làm của bản thân |
+
+Mọi endpoint đi qua `JwtAuthGuard` + `RolesGuard` + **branch-scope check** ở tầng service. Admin/manager override bắt buộc ghi `audit_logs`.
 
 ---
 
-## 🏗 Cấu trúc monorepo
+## 3. Tính năng — Mobile App (Expo + React Native)
+
+Ứng dụng nhân viên sử dụng **expo-router** file-based routing, tab navigator với 5 tabs chính:
+
+| Tab / Route | Mô tả |
+|---|---|
+| `index` (Home) | Check-in/out button, branch gần nhất, streak hiện tại, today session status. |
+| `calendar` | Lịch tháng, trạng thái từng ngày (on-time / late / absent / leave / WFH). |
+| `history` | Danh sách sessions với filter, pull-to-refresh. |
+| `chat` | HR Assistant streaming SSE từ Gemini. |
+| `profile` | Thông tin user, toggle Zero-tap, toggle Geofence Notify, notifications, logout. |
+
+**Các flow quan trọng:**
+
+- **Login** (`/login`) — email + password → JWT access (15m) + refresh (7d) lưu qua `expo-secure-store`.
+- **Manual check-in** (`/checkin`) — Foreground location + WiFi scan → gọi `POST /attendance/check-in` → server validate geofence/WiFi/device → trả session với trust score.
+- **QR Kiosk** (`/scanner`) — `expo-camera` scan QR token từ portal → `POST /attendance/qr-check-in`.
+- **Zero-tap** — `expo-task-manager` + `expo-location.startGeofencingAsync()` đăng ký geofence các branch, khi user enter vùng → background task tự gọi `POST /attendance/zero-tap/check-in` với nonce + device attestation → local notification thông báo thành công. Yêu cầu: device trusted, ≥ N lần manual check-in trước đó, zero-tap enabled, trong giờ policy.
+- **Geofence Notify** (`/notifications`) — nhắc chấm công (không tự chấm) khi vào vùng, debounce 30 phút. Requires Expo Dev Client (không hỗ trợ Expo Go).
+- **Session detail** (`/session/[id]`) — events timeline, trust score breakdown.
+
+**Native requirements (đã cấu hình trong `apps/mobile/app.json`):**
+- iOS: `NSLocationWhenInUseUsageDescription`, `NSLocationAlwaysAndWhenInUseUsageDescription`, `NSCameraUsageDescription`, `UIBackgroundModes: [location, fetch]`.
+- Android: `ACCESS_FINE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`, `ACCESS_WIFI_STATE`, `NEARBY_WIFI_DEVICES`, `FOREGROUND_SERVICE`, `CAMERA`.
+
+> Background location & remote push **không chạy trên Expo Go** (SDK 53+); phải build dev client qua `make mobile-prebuild` + `make mobile-ios` / `make mobile-android`.
+
+---
+
+## 4. Kiến trúc kỹ thuật
+
+### 4.1 High-level
+
+```
+┌─────────────────────┐        ┌────────────────────────┐
+│  Mobile (Expo RN)   │        │  Portal (Next.js 15)   │
+│  expo-router, ky    │        │  App Router, TanStack  │
+│  expo-secure-store  │        │  Query, Recharts       │
+└──────────┬──────────┘        └───────────┬────────────┘
+           │ HTTPS + JWT (Bearer)          │ HTTPS + JWT
+           └───────────────┬───────────────┘
+                           ▼
+                ┌─────────────────────┐
+                │   NestJS 10 API     │
+                │   /api/v1/*         │
+                │   Swagger /api/docs │
+                └──┬──────┬───────┬───┘
+                   │      │       │
+                   ▼      ▼       ▼
+            ┌────────┐ ┌──────┐ ┌─────────┐
+            │Postgres│ │Redis │ │ Gemini  │
+            │  16    │ │ 7    │ │2.5-flash│
+            │(Prisma)│ │BullMQ│ │function │
+            └────────┘ └──────┘ │ calling │
+                                └─────────┘
+```
+
+### 4.2 Monorepo layout
 
 ```
 smart-attendance/
 ├── apps/
-│   ├── api/              # NestJS + Prisma backend
-│   ├── portal/           # Next.js 15 admin/manager portal
-│   └── mobile/           # Expo + React Native employee app
-├── libs/shared/          # TypeScript types/utils dùng chung (Day 2+)
-├── docs/                 # Spec, ERD, API, sprint plan
+│   ├── api/        # NestJS 10 + Prisma 6 + BullMQ
+│   ├── portal/     # Next.js 15 App Router + Tailwind + React 19
+│   └── mobile/     # Expo SDK 54 + React Native 0.81 + expo-router 6
+├── docs/           # spec.md, api-spec.md, erd.md, sprint-plan.md
+├── scripts/        # reset-db.sh + helpers
 ├── docker-compose.yml
-├── .env.example
-├── PROMPT_LOG.md
-└── README.md
+├── Makefile        # make help cho 25+ targets
+└── PROMPT_LOG.md
 ```
 
----
+### 4.3 API module breakdown (NestJS)
 
-## 📈 Chiến lược scale (100 chi nhánh × 5.000 nhân viên)
-
-Chi tiết trong [`docs/spec.md §8`](docs/spec.md#8-scale-strategy-100-chi-nhánh--5000-nhân-viên). Highlight:
-
-- **Peak load:** 07:45–08:15, ~10 req/s peak — 1 Node instance xử lý được, nhưng stateless để scale ngang
-- **DB:** UNIQUE `(employee_id, work_date)` + index theo `branch_id`/`work_date`/`status`; partition `attendance_events` theo tháng (plan, chưa bật trong MVP)
-- **Cache:** Redis TTL 5' cho branch config, 60s cho dashboard aggregate
-- **Queue:** BullMQ cho `daily-summary`, `missing-checkout-close`, `report-export`, `anomaly-detection`
-- **Read model:** `daily_attendance_summaries` tổng hợp sẵn → dashboard không join raw events
-- **Rate limit:** Redis-backed, 10 req/phút/employee cho check-in, 3 req/phút/device cho zero-tap
-
----
-
-## 🎯 Sprint tracker & Tính năng theo sprint
-
-Xem [`docs/sprint-plan.md`](docs/sprint-plan.md).
-
-### Sprint 1 (Day 1) — Foundation
-- Nx monorepo + pnpm workspaces, Docker Compose (Postgres 16 + Redis 7)
-- Prisma schema v1, migration + seed cơ bản
-- Auth: JWT (access 15m + refresh 7d), RBAC (admin/manager/employee), bcrypt
-- Branch CRUD + geofence (lat/lng/radius) + WiFi whitelist (SSID/BSSID)
-- Swagger UI tại `/api/docs`, Zod env validation
-
-### Sprint 2 (Day 2) — Core check-in/out
-- Employee + EmployeeDevice (auto-register, trust flag)
-- `POST /attendance/check-in|check-out` với GPS/WiFi validation
-- Work schedule resolver (per-employee + branch default), classify on_time/late/early_leave/overtime
-- Impossible-travel detection (haversine > 120 km/h)
-- Multi-branch assignment + manager scope guard
-
-### Sprint 3 (Day 3) — History, Dashboard, Audit
-- `GET /attendance/me` history (phân trang + filter)
-- Manager `GET /attendance/sessions` + detail + override (với audit log bắt buộc)
-- Admin dashboard: today summary, anomalies, leaderboard, per-branch drill-down
-- Full seed 30 employees × 7 ngày (deterministic fixtures cho demo)
-
-### Sprint 4 (Day 4) — Trust Score v2, Jobs, Reports
-- Trust Score 0-100 với 8 risk flags (mock location, impossible travel, new device...) + 3 trust levels (high/medium/low)
-- BullMQ jobs: `daily-summary` (cron 00:30), `missing-checkout-close` (cron 23:55), `report-export` (on-demand CSV), `anomaly-detection`
-- `DailyAttendanceSummary` read model → dashboard không join raw events
-- CSV export theo ngày/chi nhánh + notifications module (in-app + override nudge)
-- React Query trên portal + mobile, SDK 54 upgrade, FinOS branding
-
-### Sprint 5 (Day 5) — Zero-tap + QR Kiosk + Multi-factor ✨
-- **Zero-tap check-in**: hệ thống tự check-in khi vào vùng chi nhánh + thiết bị tin cậy. Guard 5-AND: policy enabled → consent → not revoked → trusted device → manual quota → window → cooldown. Nonce-based replay protection (UNIQUE device_id × nonce).
-- **QR Kiosk mode**: kiosk hiển thị QR rolling 25s, HMAC-SHA256 time-bucketed token (30s bucket). Employee scan QR → backend verify HMAC + trusted device + 1-per-day. Per-branch secret + kiosk token rotation.
-- **Multi-factor wifi_scan**: mobile gửi full BSSID scan array (max 50), backend match BẤT KỲ BSSID nào trong whitelist → mạnh hơn single-BSSID đã dễ spoof.
-- **Streak & heatmap**: `GET /attendance/me/streak` — current/best streak, on-time rate 30d, heatmap 30 ngày.
-- **Portal & Mobile UI**: Đã hoàn thiện toàn màn hình Kiosk `/kiosk/[branchId]`, Mobile tích hợp Camera Scanner với Expo, Streak Widget và bật/tắt thiết lập Zero-tap độc lập trên App.
-- **Security & QA**: Throttler Guard (`3 req/min` per-device cho Zero-tap, `5 req/min` Kiosk, `100 req/h` cho QR token), bao phủ kèm e2e test Replay Attack mock hoàn chỉnh.
-- **Day 5 hardening (Session #013)**: rename `ZeroTapRevokeReason` enum theo spec (`mock_location_detected/admin_disabled/attestation_failed/branch_disabled/user_opt_out`); auto-revoke device khi phát hiện mock-location / thiếu attestation + cron `zero-tap-revoke-cleanup` (08:00 VN) phục hồi sau 7 ngày; cascade revoke khi admin disable branch policy; manager scope guard cho policy/revoke endpoint; `kiosk_token` lưu sha256 hash + plaintext chỉ trả 1 lần qua `PUT /branches/:id/qr-secret`; QR check-in chặn `BRANCH_NOT_ASSIGNED`; nonce DTO regex `[A-Za-z0-9_-]{16,128}`; full audit log cho rotate/revoke/policy change. **171/171 unit test xanh, build sạch.**
-- **Kiosk UX & Manager access (Session #014, 2026-04-18)**: Manager **quản lý chi nhánh nào thì tạo QR kiosk được cho chi nhánh đó** (enforce qua `BranchScopeGuard` trên `PUT /branches/:id/qr-secret`). Portal rewrite `/kiosk/[branchId]` — gửi `X-Kiosk-Token` header, setup form cho thiết bị chưa có token, fix response shape (`{token, expires_at, bucket_seconds, refresh_every_seconds}`). Branch detail hiển thị plaintext kiosk token inline sau rotate + auto-lưu `localStorage` cho Kiosk View cùng browser. Xoá endpoint chết `POST .../qr-secret/ensure`.
-
-### Sprint 6 (Day 6) — AI Insights + Live SSE + Mobile 5-tab ✨ **NEW**
-- **AI Insights (Gemini)**: `GET /ai/insights/weekly?branch_id?&week_start?` — phân tích tuần làm việc (on-time rate, late trend, top-late employees, recommendations). Cache 1h per (scope, scope_id, week_start) trong bảng `ai_insights_cache`. Scope filter: admin xem toàn hệ thống, manager chỉ xem branch mình quản lý. Rate limit 10/h/user.
-- **Chat HR Assistant (Session #020 — full Gemini function calling)**: `POST /ai/chat` SSE streaming. Thay vì pre-stuff stats vào system prompt, server khai báo **9 function tool** bucketed theo scope (`selfTools`: `get_my_attendance_stats`/`get_my_recent_sessions`/`get_my_streak`; `branchTools`: `get_branch_today_overview`/`get_branch_attendance_stats`/`list_late_employees`/`list_absent_today`; `adminTools`: `get_system_overview`/`compare_branches`). Loop generate→execute→respond tối đa 6 iter: Gemini quyết định gọi tool nào với argument nào → `ToolExecutor` re-check role + `managedBranchIds` runtime (chống prompt-inject cross-scope) → kết quả JSON feed ngược lại → final text được fake-stream chunk 40 chars / 25ms. Model thấy `{error:'BRANCH_OUT_OF_SCOPE'|'INSUFFICIENT_PERMISSION'}` khi call sai scope và tự xin lỗi thay vì crash SSE. History 20 messages gần nhất + persist vào `ai_chat_messages`. Rate limit 20/h/user.
-- **Gemini STUB mode**: không cần `GEMINI_API_KEY` — client fallback trả canned Vietnamese responses. Cho phép demo + testing trước khi provision key. Set `GEMINI_API_KEY` trong `.env` để switch sang real mode.
-- **Live SSE feed**: `GET /dashboard/live` — Redis pub/sub channel `attendance:live`. AttendanceService publish event sau tx commit (check-in + check-out). Portal `<LiveFeed>` trên `/dashboard` hiển thị 20 event gần nhất + connected badge. JWT auth qua `?access_token=` query param (EventSource không set header được).
-- **Mobile 5-tab shell**: `app/(tabs)` — Check-in, Lịch sử, Lịch, Chat AI, Profile. Chat tab dùng fetch + `ReadableStream` parse SSE (React Native không có EventSource). Profile tab: zero-tap toggle + logout.
-- **Day 6 polish (Session #019, 2026-04-18)** — đóng nốt các gap còn lại của Sprint 6:
-  - **Mobile History infinite scroll**: `FlatList` với `onEndReached` + `page/limit=20` (endpoint có sẵn `GET /attendance/me`), `loadingRef` chống double-fire, pull-to-refresh, empty + end-of-list state.
-  - **Mobile Calendar tab**: `react-native-calendars` với `LocaleConfig` tiếng Việt, `markedDates` tô màu theo status (on_time/late/absent/overtime/missing_checkout), card tổng kết tháng (phiên/đúng giờ/muộn/vắng + total worked hours) + chi tiết ngày chọn + legend.
-  - **Smart Geofence Notification**: `apps/mobile/lib/geofence-notify.ts` export `enableGeofenceNotify` / `disableGeofenceNotify` / `isGeofenceNotifyEnabled`. Task `SA_GEOFENCE_NOTIFY` định nghĩa ở module-scope trong `_layout.tsx` (yêu cầu của `expo-task-manager` để daemon nhận được closure). Region lấy từ `GET /attendance/me/geofences` (endpoint mới), debounce 30' qua `expo-secure-store`, `expo-notifications.scheduleNotificationAsync` khi Enter. Profile tab: toggle có error toast cho 4 lý do (`foreground_denied`, `background_denied`, `notifications_denied`, `no_geofences`).
-  - **Recharts dashboard charts**: `apps/portal/src/components/dashboard-charts.tsx` — `TrendChart` (LineChart 3 series: on-time/late/absent, 7 ngày), `TodayStatusPie` (donut với empty state), `TopBranchesBar` (horizontal BarChart chiều cao động). Backend: `GET /dashboard/admin/trend` + `/dashboard/manager/:branchId/trend` đọc `daily_attendance_summaries` qua `groupBy(workDate, status)` + pre-fill buckets cho những ngày chưa có summary để chart không nhảy cóc.
-  - **AI Insights cache fix**: `aiInsightCache.findUnique`/`upsert` với composite unique `(scope, scopeId, weekStart)` reject `null` cho `scopeId` (admin scope) — refactor sang `findFirst` + explicit `update`/`create` theo `id`. Fix runtime `PrismaClientValidationError` khi admin mở `/ai/insights/weekly`.
-- **Day 6 polish (Session #017, 2026-04-18)**:
-  - **Dashboard scope drift fix**: `GET /dashboard/manager/:branchId` giờ nhận JWT `managed_branch_ids` từ controller và check JWT-first, fallback DB `ManagerBranch` — align với cùng nguồn mà `/branches` picker đang dùng, tránh 404 khi JWT và DB lệch.
-  - **Portal chatbot menu tab**: Thêm mục "🤖 Trợ lý AI" trên sidebar cho **tất cả role** → route `/chat` (full-screen chat). Floating chat widget vẫn giữ ở góc phải làm lựa chọn nhanh.
-  - **"Đoạn chat mới"**: `DELETE /ai/chat/history` — xoá lịch sử của chính user; cả widget lẫn `/chat` đều có nút ✨ để bắt đầu đoạn chat mới.
-  - **Gemini 2.5 + true streaming**: Default model nâng từ `gemini-1.5-flash` → `gemini-2.5-flash`; `GeminiClient.stream()` đổi sang endpoint `streamGenerateContent?alt=sse` thật (trước đây gọi full `generateContent` rồi tự chia chunk → trễ 30s+). `thinkingConfig: { thinkingBudget: 0 }` tắt "thinking mode" cho chat → first-token ~500ms.
-  - **SSE interceptor fix**: `ResponseTransformInterceptor` giờ skip handler `@Sse()` (read metadata `SSE_METADATA` từ `@nestjs/common/constants`). Trước đó, global interceptor double-wrap mỗi `MessageEvent` thành `{"data":{"data":{"delta":"..."}}}` → client parse ra `undefined` → response chỉ hiện sau reload. Bây giờ stream token-by-token đúng realtime.
-  - **Thinking UI**: bubble "Đang suy nghĩ" với ping halo + bouncing dots trước khi token đầu về; typing cursor (pulsing bar) trên bubble assistant khi stream còn chạy.
-  - **React Query `NotificationBell`**: rewrite dùng `useApiQuery` + mutation invalidate, share cache giữa desktop sidebar và mobile topbar; polling 60s qua `refetchInterval`.
+| Module | Trách nhiệm |
+|---|---|
+| `auth` | Login, refresh token, `/me`, argon2 password, JWT access 15m + refresh 7d |
+| `branches` | Branch CRUD, wifi_configs, geofences, zero-tap policy |
+| `employees` | Employee CRUD, device list, zero-tap toggle, assignments |
+| `attendance` | Manual check-in/out, sessions, events, me/streak, me/geofences |
+| `zero-tap` | Background check-in/out, nonce validation, device attestation, auto-revoke |
+| `kiosk` | QR token rotation, `/attendance/qr-check-in` |
+| `reports` | Daily summary, branch report, CSV export async (BullMQ) |
+| `dashboard` | Admin/manager overview, trend, anomalies, leaderboard, live SSE |
+| `ai` | Weekly insights (cached 1h), Chat SSE với 9 function tools, scope guard 2-tier |
+| `live` | `LiveBusService` in-memory pub/sub + SSE endpoint `/dashboard/live` |
+| `notifications` | User-facing notification inbox |
+| `audit-logs` | Immutable log của override/revoke |
+| `work-schedules` | Schedule CRUD + assignment |
+| `queue` | BullMQ setup, missing-checkout processor, export processor |
+| `prisma` | PrismaService wrapper + transaction helper |
 
 ---
 
-## 🧠 AI workflow
+## 5. Technical deep-dive
 
-1. Mỗi feature đều bắt đầu bằng đọc `docs/spec.md` + `docs/api-spec.md` + `docs/erd.md`
-2. AI sinh code → dev review 100% → test → commit
-3. Ghi `PROMPT_LOG.md` cho mỗi session: prompt đáng học, prompt phải sửa, quyết định phát sinh
+### 5.1 Validation 2 lớp
+
+- **DTO layer** — `class-validator` + `class-transformer` cho format/type/required.
+- **Service layer** — business rule (geofence distance, schedule grace, role/branch scope, zero-tap guard).
+
+### 5.2 Trust Score (0–100)
+
+Pure function `trust-score.ts`, inputs: GPS accuracy, WiFi match, device trust, history consistency. Output: `{ score, flags[], method }`. Được tính lại mỗi check-in/out và lưu vào `attendance_events`.
+
+### 5.3 Zero-tap (flagship)
+
+Điều kiện cần đủ (AND):
+1. `device.is_trusted = true`
+2. `device.zero_tap_enabled = true`
+3. `user.manual_checkins >= min_manual_checkins_to_enable`
+4. Attestation token hợp lệ (Play Integrity / App Attest)
+5. Request trong `zero_tap_window` của branch policy
+6. Cooldown (mặc định 4h) từ lần zero-tap trước
+7. `nonce` unique trong window 90s (chống replay)
+
+Trust score zero-tap trừ 5 điểm base. Mock location bị detect → **auto revoke device 7 ngày** + audit log. Toàn bộ pipeline cô lập tại `zero-tap.service.ts` + pure `zero-tap-guard.ts`.
+
+### 5.4 AI Chat — Gemini Function Calling
+
+- **9 tools** nhóm theo scope: self (employee), branch (manager), admin.
+- **Scope guard 2 tầng**: tier 1 system prompt + tier 2 runtime re-check trong `ToolExecutor` → trả `BRANCH_OUT_OF_SCOPE` / `INSUFFICIENT_PERMISSION`.
+- Vòng lặp generate → execute → respond tối đa **6 iterations**, sau đó fakeStream text cuối cùng qua SSE.
+- Fallback **STUB mode** khi `GEMINI_API_KEY` rỗng (canned replies để dev offline).
+
+### 5.5 Realtime & Queue
+
+- **SSE** `/dashboard/live` qua `LiveBusService` (EventEmitter) — publish mỗi check-in thành công.
+- **BullMQ jobs**: `missing-checkout` (cron đóng session quên check-out), `report-export` (CSV async).
+- Rate limit `@nestjs/throttler`: login 5/min, check-in 10/min, AI chat 20/h, AI insights 60/h (cache DB hấp thụ spike).
+
+### 5.6 Caching
+
+- **Redis** cache branch config (geofences + wifi) TTL 5'.
+- **DB-backed** `ai_insight_cache` TTL 1h (scope: admin / branch, per week).
+- **Read model** `daily_attendance_summaries` cho dashboard (không join raw events).
+
+### 5.7 API contract
+
+- REST JSON, base path `/api/v1`.
+- Response shape wrap qua `ResponseTransformInterceptor`:
+  ```json
+  { "data": <T | T[]>, "meta": { "pagination": { ... } } }
+  { "error": { "code": "...", "message": "...", "details": { } } }
+  ```
+- Swagger UI: `http://localhost:3000/api/docs`.
+- Xem chi tiết tại [`docs/api-spec.md`](docs/api-spec.md).
 
 ---
 
-## 📄 License
+## 6. Quick start
 
-Internal — FinOS Solutions Team.
+### 6.1 Prerequisites
+
+| Tool | Version |
+|---|---|
+| Node.js | **20.x hoặc 22.x LTS** (Node ≥ 25 phá ESM resolver của `@expo/metro`) |
+| pnpm | **10.33** (`corepack enable` hoặc `npm i -g pnpm@10.33`) |
+| Docker | Desktop + Compose V2 |
+| Mobile | Xcode 15+ (iOS) hoặc Android Studio Giraffe+ (Android); Expo dev client |
+
+### 6.2 Cài đặt
+
+```bash
+git clone <repo-url> smart-attendance
+cd smart-attendance
+cp .env.example .env           # điền GEMINI_API_KEY nếu muốn AI thật
+make install                   # pnpm install toàn workspace
+```
+
+### 6.3 Chạy hạ tầng (Postgres + Redis)
+
+```bash
+make docker-up                 # postgres:16 + redis:7 (+ api/portal nếu dùng compose full)
+make db-migrate                # prisma migrate dev
+make db-seed                   # seed roles, branches, admin/manager/30 employees
+```
+
+### 6.4 Chạy dev servers
+
+| Service | Lệnh | Mô tả |
+|---|---|---|
+| API | `make dev-api` | NestJS watch mode, port 3000 |
+| Portal | `make dev-portal` | Next.js dev, port 3100 |
+| Mobile | `make dev-mobile` | Expo dev server (cần dev client) |
+| API + Portal song song | `make dev` | — |
+
+Build native mobile (yêu cầu Xcode/Android Studio):
+
+```bash
+make mobile-prebuild   # regen ios/ + android/ từ app.json
+make mobile-ios        # chạy trên iOS simulator
+make mobile-android    # chạy trên Android emulator
+```
+
+### 6.5 Kiểm thử & chất lượng
+
+```bash
+make typecheck         # tsc --noEmit cho cả 3 workspaces
+make test              # jest (api) + next lint (portal)
+make test-e2e          # supertest end-to-end (cần docker-up)
+make verify            # typecheck + lint + test (chạy trước khi push)
+```
+
+Chạy `make help` để xem toàn bộ targets.
+
+---
+
+## 7. Default credentials (seed)
+
+Sau khi `make db-seed` thành công, có sẵn các tài khoản:
+
+| Role | Email | Password | Ghi chú |
+|---|---|---|---|
+| Admin | `admin@demo.com` | `Admin@123` | Full quyền hệ thống |
+| Manager | `manager.hcm@demo.com` | `Manager@123` | Quản lý chi nhánh **HCM-Q1** |
+| Employee | `employee001@demo.com` … `employee030@demo.com` | `Employee@123` | 30 nhân viên (10/chi nhánh × 3 chi nhánh HCM/HN/DN) |
+
+> Đổi password ngay sau khi seed trên môi trường không-dev. Các secret JWT mặc định trong `.env.example` chỉ dùng để chạy thử.
+
+---
+
+## 8. Service URLs
+
+| Service | URL | Notes |
+|---|---|---|
+| API (REST) | `http://localhost:3000/api/v1` | Base path cho mọi endpoint |
+| API Swagger | `http://localhost:3000/api/docs` | OpenAPI UI |
+| API health | `http://localhost:3000/api/v1/health` | Readiness probe |
+| Live feed (SSE) | `http://localhost:3000/api/v1/dashboard/live` | Requires JWT |
+| Portal | `http://localhost:3100` | Next.js admin/manager |
+| Portal login | `http://localhost:3100/login` | — |
+| Mobile dev | `http://localhost:8081` | Expo Metro bundler |
+| Postgres | `postgresql://sa_user:***@localhost:5432/smart_attendance` | Local dev |
+| Redis | `redis://localhost:6379` | Cache + BullMQ |
+| `EXPO_PUBLIC_API_BASE_URL` | `http://<lan-ip>:3000/api/v1` | Mobile gọi API phải dùng LAN IP của máy host, không `localhost` |
+
+---
+
+## 9. Cấu trúc tài liệu
+
+| File | Nội dung |
+|---|---|
+| [`docs/spec.md`](docs/spec.md) | Rule nghiệp vụ: check-in, zero-tap, trust score, anti-fraud 4 lớp |
+| [`docs/api-spec.md`](docs/api-spec.md) | API contract chi tiết + error codes + rate limit |
+| [`docs/erd.md`](docs/erd.md) | Schema Prisma + index DB |
+| [`docs/sprint-plan.md`](docs/sprint-plan.md) | Checklist 6-day AI-assisted build |
+| [`docs/CLAUDE.md`](docs/CLAUDE.md) | Context cho AI IDE (Claude Code / Cursor / Copilot) |
+| [`PROMPT_LOG.md`](PROMPT_LOG.md) | Nhật ký prompt + output + chỉnh sửa |
+
+---
+
+## 10. License
+
+Internal project — FinOS Asia. All rights reserved.

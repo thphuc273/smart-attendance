@@ -1910,4 +1910,3 @@ Tại sao không streaming trong loop: Gemini streaming khó tách functionCall 
 - [ ] Cache tool result theo (user, tool, args hash) trong 60s để tránh re-query khi model loop (ví dụ gọi `get_my_attendance_stats` 2 lần trong 1 turn).
 - [ ] Telemetry: log `{userId, tool, latencyMs, error?}` để monitor tool usage & catch scope-violation attempts.
 
-
