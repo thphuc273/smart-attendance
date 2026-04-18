@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
+import { LiveFeed } from '../../components/live-feed';
 import { useRequireAuth } from '../../lib/auth';
 import { isAdmin } from '../../lib/api';
 import { useApiQuery, queryKeys } from '../../lib/queries';
@@ -133,6 +134,11 @@ export default function DashboardPage() {
   const managerDash = managerDashQ.data?.data ?? null;
   const error =
     anomaliesQ.error?.message ?? overviewQ.error?.message ?? managerDashQ.error?.message ?? null;
+
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window !== 'undefined') setAccessToken(localStorage.getItem('access_token'));
+  }, []);
 
   if (!user) return null;
 
@@ -420,6 +426,10 @@ export default function DashboardPage() {
               </AnomalyCard>
             </div>
           )}
+        </section>
+
+        <section className="mt-6">
+          <LiveFeed token={accessToken} />
         </section>
       </main>
     </TopNav>

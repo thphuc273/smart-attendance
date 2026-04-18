@@ -15,7 +15,12 @@ export interface JwtAccessPayload {
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        // SSE fallback — EventSource cannot set custom headers, so clients
+        // pass the access token via ?access_token=... on SSE endpoints only.
+        ExtractJwt.fromUrlQueryParameter('access_token'),
+      ]),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });

@@ -20,6 +20,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ZeroTapModule } from './modules/zero-tap/zero-tap.module';
 import { KioskModule } from './modules/kiosk/kiosk.module';
 import { AiModule } from './modules/ai/ai.module';
+import { LiveModule } from './modules/live/live.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { AiModule } from './modules/ai/ai.module';
     ZeroTapModule,
     KioskModule,
     AiModule,
+    LiveModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
