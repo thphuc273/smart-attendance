@@ -57,13 +57,12 @@ export default function LoginPage() {
         <div className="mb-8 text-center">
           <Image
             src="/finos-logo.png"
-            alt="FinOS"
-            width={160}
-            height={50}
+            alt="FinOS Smart Attendance"
+            width={320}
+            height={105}
             priority
-            className="mx-auto mb-5 h-12 w-auto"
+            className="mx-auto mb-5 h-24 w-auto"
           />
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Smart Attendance</h1>
           <p className="mt-1 text-sm text-slate-500">Đăng nhập để tiếp tục</p>
         </div>
 

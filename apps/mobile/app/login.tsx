@@ -60,7 +60,6 @@ export default function LoginScreen() {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.title}>Smart Attendance</Text>
           <Text style={styles.subtitle}>Đăng nhập để tiếp tục</Text>
         </View>
 
@@ -124,7 +123,7 @@ const styles = StyleSheet.create({
   blob: { position: 'absolute', width: 260, height: 260, borderRadius: 999 },
   content: { padding: 24 },
   hero: { alignItems: 'center', marginBottom: 28 },
-  logo: { width: 150, height: 48, marginBottom: 10 },
+  logo: { width: 240, height: 78, marginBottom: 10 },
   title: { fontSize: 24, fontWeight: '700', color: colors.slate900 },
   subtitle: { marginTop: 4, fontSize: 14, color: colors.slate500 },
   card: { backgroundColor: colors.surface, padding: 22, borderRadius: radius.xl, ...shadow.card },

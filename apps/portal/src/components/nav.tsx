@@ -116,16 +116,13 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
         <Link href={homeHref} className="flex items-center gap-3 px-5 pt-5">
           <Image
             src="/finos-logo.png"
-            alt="FinOS"
-            width={96}
-            height={30}
+            alt="FinOS Smart Attendance"
+            width={160}
+            height={52}
             priority
-            className="h-7 w-auto"
+            className="h-11 w-auto"
           />
         </Link>
-        <p className="mt-1 px-5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Smart Attendance
-        </p>
         <div className="flex-1 overflow-y-auto">{navList}</div>
         {userPanel}
       </aside>
@@ -136,13 +133,12 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
           <Link href={homeHref} className="flex items-center gap-2">
             <Image
               src="/finos-logo.png"
-              alt="FinOS"
-              width={72}
-              height={22}
+              alt="FinOS Smart Attendance"
+              width={120}
+              height={39}
               priority
-              className="h-6 w-auto"
+              className="h-9 w-auto"
             />
-            <span className="text-sm font-semibold text-slate-900">Smart Attendance</span>
           </Link>
           <div className="flex items-center gap-1">
             {user && <NotificationBell />}
@@ -172,11 +168,11 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
             <div className="flex items-center justify-between px-5 pt-5">
               <Image
                 src="/finos-logo.png"
-                alt="FinOS"
-                width={96}
-                height={30}
+                alt="FinOS Smart Attendance"
+                width={160}
+                height={52}
                 priority
-                className="h-7 w-auto"
+                className="h-11 w-auto"
               />
               <button
                 onClick={() => setMobileOpen(false)}
