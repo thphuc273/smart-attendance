@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { clearAuth, getApi, type StoredUser } from '../lib/api';
 import { colors, radius, shadow } from '../lib/theme';
 
 export function Header({ title, user }: { title: string; user: StoredUser | null }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [unread, setUnread] = useState(0);
 
   const loadUnread = useCallback(async () => {
@@ -45,7 +47,7 @@ export function Header({ title, user }: { title: string; user: StoredUser | null
         : { bg: colors.emerald100, fg: colors.emerald700 };
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, { paddingTop: insets.top + 12 }]}>
       <View style={styles.topRow}>
         <Image
           source={require('../assets/finos-logo.png')}
@@ -94,7 +96,6 @@ export function Header({ title, user }: { title: string; user: StoredUser | null
 
 const styles = StyleSheet.create({
   wrap: {
-    paddingTop: 56,
     paddingHorizontal: 20,
     paddingBottom: 16,
     backgroundColor: colors.surface,

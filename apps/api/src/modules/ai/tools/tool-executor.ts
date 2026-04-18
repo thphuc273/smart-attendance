@@ -78,6 +78,7 @@ export class ToolExecutor {
     });
     const onTime = sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length;
     const late = sessions.filter((s) => s.status === AttendanceSessionStatus.late).length;
+    const earlyLeave = sessions.filter((s) => s.status === AttendanceSessionStatus.early_leave).length;
     const absent = sessions.filter((s) => s.status === AttendanceSessionStatus.absent).length;
     const overtime = sessions.filter((s) => s.status === AttendanceSessionStatus.overtime).length;
     const missingCheckout = sessions.filter((s) => s.checkOutAt === null).length;
@@ -91,6 +92,7 @@ export class ToolExecutor {
         sessions: total,
         on_time: onTime,
         late,
+        early_leave: earlyLeave,
         absent,
         overtime,
         missing_checkout: missingCheckout,
@@ -368,6 +370,7 @@ function summarize(sessions: Array<{ status: AttendanceSessionStatus; checkOutAt
   const total = sessions.length;
   const onTime = sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length;
   const late = sessions.filter((s) => s.status === AttendanceSessionStatus.late).length;
+  const earlyLeave = sessions.filter((s) => s.status === AttendanceSessionStatus.early_leave).length;
   const absent = sessions.filter((s) => s.status === AttendanceSessionStatus.absent).length;
   const overtime = sessions.filter((s) => s.status === AttendanceSessionStatus.overtime).length;
   const missing = sessions.filter((s) => s.checkOutAt === null).length;
@@ -375,6 +378,7 @@ function summarize(sessions: Array<{ status: AttendanceSessionStatus; checkOutAt
     sessions: total,
     on_time: onTime,
     late,
+    early_leave: earlyLeave,
     absent,
     overtime,
     missing_checkout: missing,

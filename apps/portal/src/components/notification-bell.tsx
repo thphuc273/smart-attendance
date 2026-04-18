@@ -16,10 +16,8 @@ interface Notification {
 }
 
 interface ListResponse {
-  data: {
-    items: Notification[];
-    meta: { total: number; unread: number; page: number; limit: number; total_pages: number };
-  };
+  data: Notification[];
+  meta: { total: number; unread: number; page: number; limit: number; total_pages: number };
 }
 
 const POLL_MS = 60_000;
@@ -50,8 +48,8 @@ export function NotificationBell({ popupClassName = 'right-0 top-full mt-2' }: {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const items = listQ.data?.data?.items ?? [];
-  const unread = listQ.data?.data?.meta?.unread ?? 0;
+  const items = listQ.data?.data ?? [];
+  const unread = listQ.data?.meta?.unread ?? 0;
 
   const markOneM = useMutation({
     mutationFn: (id: string) => getApi().patch(`notifications/${id}/read`),

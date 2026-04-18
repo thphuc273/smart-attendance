@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { getApi, hasToken } from '../../lib/api';
 
 interface Event {
@@ -74,6 +74,7 @@ export default function SessionDetailScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+      <Stack.Screen options={{ headerShown: true, title: 'Chi tiết phiên', headerBackTitle: 'Quay lại' }} />
       <View style={styles.header}>
         <Text style={styles.date}>
           {new Date(session.workDate).toLocaleDateString('vi-VN', {

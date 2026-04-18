@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApi, hasToken } from '../lib/api';
 import { colors, radius, shadow } from '../lib/theme';
 
@@ -23,14 +24,13 @@ interface Notification {
 }
 
 interface Resp {
-  data: {
-    items: Notification[];
-    meta: { total: number; unread: number; page: number; limit: number; total_pages: number };
-  };
+  data: Notification[];
+  meta: { total: number; unread: number; page: number; limit: number; total_pages: number };
 }
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -40,8 +40,8 @@ export default function NotificationsScreen() {
     setError(null);
     try {
       const resp = await getApi().get('notifications?limit=50').json<Resp>();
-      setItems(resp.data.items);
-      setUnread(resp.data.meta.unread);
+      setItems(resp.data);
+      setUnread(resp.meta.unread);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -88,7 +88,7 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
           <Text style={styles.backText}>← Quay lại</Text>
         </Pressable>
@@ -155,7 +155,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    paddingTop: 56,
     backgroundColor: colors.surface,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,
