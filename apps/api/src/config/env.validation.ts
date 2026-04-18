@@ -48,6 +48,18 @@ class EnvSchema {
   @IsString()
   @IsOptional()
   ALLOWED_ORIGINS?: string;
+
+  @IsString()
+  @IsOptional()
+  GEMINI_API_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  GEMINI_MODEL?: string;
+
+  @IsNumber()
+  @IsOptional()
+  AI_CACHE_TTL?: number;
 }
 
 export function validateEnv(raw: Record<string, unknown>) {

@@ -19,6 +19,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ZeroTapModule } from './modules/zero-tap/zero-tap.module';
 import { KioskModule } from './modules/kiosk/kiosk.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { KioskModule } from './modules/kiosk/kiosk.module';
     NotificationsModule,
     ZeroTapModule,
     KioskModule,
+    AiModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

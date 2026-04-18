@@ -234,6 +234,7 @@ model Employee {
   scheduleAssigns WorkScheduleAssignment[]
   sessions        AttendanceSession[]
   dailySummaries  DailyAttendanceSummary[]
+  aiChatMessages  AiChatMessage[]
 
   @@index([primaryBranchId])
   @@index([departmentId])
@@ -540,4 +541,47 @@ model BranchQrSecret {
   branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
   @@map("branch_qr_secrets")
+}
+
+enum AiChatRole {
+  user
+  assistant
+  system
+}
+
+/// Chat history for AI HR Assistant (employee scope).
+model AiChatMessage {
+  id             String     @id @default(uuid()) @db.Uuid
+  employeeId     String     @map("employee_id") @db.Uuid
+  conversationId String?    @map("conversation_id") @db.Uuid
+  role           AiChatRole
+  content        String     @db.Text
+  tokensIn       Int?       @map("tokens_in")
+  tokensOut      Int?       @map("tokens_out")
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, createdAt(sort: Desc)])
+  @@map("ai_chat_messages")
+}
+
+enum AiInsightScope {
+  admin
+  branch
+}
+
+/// Cached weekly insights — Gemini output, 1h TTL. Re-used by all readers within scope.
+model AiInsightCache {
+  id          String         @id @default(uuid()) @db.Uuid
+  scope       AiInsightScope
+  scopeId     String?        @map("scope_id") @db.Uuid // null for global admin scope
+  weekStart   DateTime       @map("week_start") @db.Date
+  payload     Json
+  generatedAt DateTime       @default(now()) @map("generated_at")
+  expiresAt   DateTime       @map("expires_at")
+
+  @@unique([scope, scopeId, weekStart], map: "ai_insights_cache_scope_key")
+  @@index([expiresAt])
+  @@map("ai_insights_cache")
 }
