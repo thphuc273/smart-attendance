@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  logo: { width: 90, height: 28 },
+  logo: { width: 140, height: 44 },
   rightActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   bellBtn: {
     paddingHorizontal: 8,

@@ -14,7 +14,7 @@ export class AiController {
   constructor(private readonly ai: AiService) {}
 
   @Get('insights/weekly')
-  @Throttle({ default: { ttl: 3_600_000, limit: 10 } })
+  @Throttle({ default: { ttl: 3_600_000, limit: 60 } })
   weekly(@CurrentUser() user: AuthenticatedUser, @Query() q: WeeklyInsightsQueryDto) {
     return this.ai.getWeeklyInsights(user, q.branch_id, q.week_start);
   }
