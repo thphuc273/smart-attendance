@@ -42,6 +42,12 @@ export class AttendanceController {
     return this.attendance.getMyStreak(user.id);
   }
 
+  @Get('me/geofences')
+  @Roles(RoleCode.employee)
+  getMyGeofences(@CurrentUser() user: AuthenticatedUser) {
+    return this.attendance.getMyGeofences(user.id);
+  }
+
   @Get('sessions')
   @Roles(RoleCode.manager, RoleCode.admin)
   listSessions(@CurrentUser() user: AuthenticatedUser, @Query() dto: ListSessionsDto) {

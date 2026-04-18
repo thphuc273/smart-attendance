@@ -305,8 +305,9 @@
 ### 6.2 API endpoints
 **AI (`api-spec.md` §5E):**
 - [ ] `GET /ai/insights/weekly?branch_id?&week_start?` — admin xem toàn hệ thống, manager scope branch; đọc cache nếu còn hạn 1h; nếu miss → gọi Gemini (`gemini-1.5-flash`) với system prompt có số liệu aggregate → parse 3 mục `{ positives[], concerns[], recommendations[] }` + lưu cache
-- [ ] `POST /ai/chat` — streaming SSE; body `{ message, conversation_id? }`; server build context từ dữ liệu scope của user (sessions 30 ngày, schedule, streak); employee chỉ thấy data của mình; trả chunks `data: {delta}` + final `data: [DONE]`
-- [ ] `GET /ai/chat/history?limit=50`
+- [x] `POST /ai/chat` — streaming SSE; body `{ message, conversation_id? }`; server build context từ dữ liệu scope của user (sessions 30 ngày, schedule, streak); employee chỉ thấy data của mình; trả chunks `data: {delta}` + final `data: [DONE]` (Session #017: real `streamGenerateContent?alt=sse` với `thinkingBudget=0` → first-token ~500ms; Session #020: **full tool calling** — bỏ pre-stuff stats, 9 Gemini function tool bucketed theo scope employee/manager/admin + `ToolExecutor` re-check scope runtime, loop generate→execute→respond tối đa 6 iter rồi fake-stream final text)
+- [x] `GET /ai/chat/history?limit=50`
+- [x] `DELETE /ai/chat/history` — xoá toàn bộ chat của user hiện tại, phục vụ nút "Đoạn chat mới" (Session #017)
 
 **Live feed (`api-spec.md` §7.5):**
 - [ ] `GET /dashboard/live` SSE endpoint — publish qua Redis pub/sub channel `attendance:live` từ `AttendanceService.checkIn/out` success; event payload `{ event_id, employee_code, full_name, branch_name, status, trust_score, created_at }`; admin thấy all, manager scope branch
@@ -315,29 +316,32 @@
 - [ ] (Không cần endpoint mới) — mobile-only feature, dùng `expo-location.startGeofencingAsync` + debounce 30 phút lưu AsyncStorage `last_notified_at[branch_id]`
 
 ### 6.3 Logic
-- [ ] `libs/api/ai/` module: `GeminiClient` (wrap `@google/generative-ai`), `InsightPromptBuilder`, `ChatContextBuilder`, `AIGuard` (enforce scope employee/manager/admin)
+- [x] `apps/api/src/modules/ai/` module: `GeminiClient` (fetch Gemini REST + streamGenerateContent + **generateWithTools/fakeStream** cho function calling), `InsightPromptBuilder`, `ChatContextBuilder` (identity-only, Session #020), `ToolExecutor` (dispatch 9 tool + scope guard runtime), `tools/tool-definitions.ts` (selfTools/branchTools/adminTools)
 - [ ] Rate limit AI: `/ai/chat` 20/giờ/user, `/ai/insights/weekly` 10/giờ/user
 - [ ] Redis pub/sub publisher tại `AttendanceService` sau transaction commit
 - [ ] SSE controller dùng `Observable` RxJS, heartbeat 15s, đóng kết nối khi client disconnect
-- [ ] Env: `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-1.5-flash`, `AI_CACHE_TTL=3600`
+- [x] Env: `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-2.5-flash` (nâng từ 1.5-flash → 2.0-flash → 2.5-flash do Google deprecate chuỗi), `AI_CACHE_TTL=3600`
 
 ### 6.4 UI
 - [ ] **Portal — Dashboard (`/dashboard`):**
-  - [ ] Panel "AI Insights tuần" (3 cột: Điểm tích cực / Cần chú ý / Đề xuất) — skeleton loader + refresh button
-  - [ ] Charts thêm: line "Chấm công theo ngày" (7 ngày), bar "Theo chi nhánh" top 10, pie "Trạng thái hôm nay" (on_time/late/early_leave) — Recharts
+  - [x] Panel "AI Insights tuần" (3 cột: Điểm tích cực / Cần chú ý / Đề xuất) — skeleton loader + refresh button (Session #018: `ai-insights-panel.tsx`, mount cho admin + manager-scoped dashboard; map cả shape legacy `positives/concerns` lẫn shape Gemini thực tế `highlights/anomalies`)
+  - [x] Menu "🤖 Trợ lý AI" trên sidebar (tất cả role) → `/chat` full-screen + floating `ChatWidget` giữ ở mọi trang (Session #017)
+  - [x] Nút "✨ Đoạn chat mới" cả trên `/chat` và `ChatWidget` (Session #017)
+  - [x] Thinking bubble (ping halo + bouncing dots) + typing cursor trên bubble assistant khi stream (Session #017)
+  - [x] Charts thêm: line "Chấm công theo ngày" (7 ngày), bar "Theo chi nhánh" top 10, pie "Trạng thái hôm nay" (on_time/late/early_leave) — Recharts (Session #019: `dashboard-charts.tsx`, `GET /dashboard/admin/trend` + `/dashboard/manager/:id/trend`, groupBy `DailyAttendanceSummary`)
   - [ ] Component **LiveFeed** ở sidebar phải: EventSource `/dashboard/live`, append top 20, fade-in animation
 - [ ] **Mobile (Expo) — 5-tab shell:**
   - [ ] `app/(tabs)/_layout.tsx` với 5 tab: Check-in · History · **Lịch** · **Chat AI** · **Profile** (icon từ `@expo/vector-icons`)
-  - [ ] Tab **History**: cursor-based infinite scroll (FlashList + `onEndReached`), mỗi item hiện time/branch/status/trust score
-  - [ ] Tab **Lịch**: `react-native-calendars` — dot xanh/đỏ từ daily summaries + card tổng hợp tháng (đã có monthly summary API)
-  - [ ] Tab **Chat AI**: màn hình chat (Gifted Chat hoặc custom) — stream SSE bằng `fetch` + reader; history load từ `/ai/chat/history`
-  - [ ] Tab **Profile**: user info + toggle zero-tap + toggle "Nhắc check-in khi tới chi nhánh" + logout
-  - [ ] Background task `GEOFENCE_NOTIFY` — register các branch có assignment, enter → check `last_notified_at[branch_id]` (debounce 30'), `expo-notifications.scheduleNotificationAsync` "Bạn đang gần HCM-Q1, nhớ check-in nhé"
+  - [x] Tab **History**: `onEndReached` infinite scroll (FlatList + `page`/`limit`), mỗi item hiện time/branch/status/trust score (Session #019: replaced 1-line re-export stub)
+  - [x] Tab **Lịch**: `react-native-calendars` — dot màu theo status (đúng giờ/muộn/vắng/OT) từ `/attendance/me?date_from&date_to` + card tổng kết tháng + chi tiết ngày chọn (Session #019)
+  - [x] Tab **Chat AI**: màn hình chat — stream SSE bằng `fetch` + reader (`reactNative: { textStreaming: true }`); history load từ `/ai/chat/history` (Session #016/017)
+  - [x] Tab **Profile**: user info + toggle zero-tap + toggle "Nhắc check-in khi tới chi nhánh" (đã wire vào Session #019) + logout
+  - [x] Background task `GEOFENCE_NOTIFY` — `expo-location.startGeofencingAsync` với region lấy từ `GET /attendance/me/geofences`, enter → check `last_notified_at[branch_id]` (debounce 30' qua `expo-secure-store`), `expo-notifications.scheduleNotificationAsync` "Bạn đang gần chi nhánh, nhớ check-in nhé" (Session #019)
 
 ### 6.5 Test
-- [ ] Unit: `InsightPromptBuilder` (scope filter, số liệu aggregate — 5 test)
-- [ ] Unit: `ChatContextBuilder` employee scope isolation (3 test: employee không thấy data user khác)
-- [ ] Unit: `AIGuard` reject employee query về user khác → 403 (2 test)
+- [x] Unit: `InsightPromptBuilder` (scope filter, số liệu aggregate — 8 test, Session #018)
+- [x] Unit: `ChatContextBuilder` employee/manager/admin scope isolation (12 test, Session #018)
+- [x] Unit: `AiService` scope guard — employee/manager/admin scope enforcement + `clearChatHistory` isolation (5 test, Session #018)
 - [ ] E2E: `/ai/chat` streaming end-to-end với mock Gemini (nock)
 - [ ] E2E: SSE `/dashboard/live` nhận event sau `POST /attendance/check-in`
 - [ ] Mobile smoke: mở từng tab không crash, Chat AI gửi message nhận reply

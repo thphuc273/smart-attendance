@@ -37,6 +37,22 @@
         {
           "cameraPermission": "Cần quyền máy ảnh để quét mã QR Kiosk."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Cần quyền vị trí để check-in tại chi nhánh.",
+          "locationAlwaysAndWhenInUsePermission": "Cần quyền vị trí nền để nhắc chấm công & zero-tap khi vào vùng chi nhánh.",
+          "locationAlwaysPermission": "Cần quyền vị trí nền để nhắc chấm công & zero-tap khi vào vùng chi nhánh.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#4F46E5"
+        }
       ]
     ],
     "experiments": {

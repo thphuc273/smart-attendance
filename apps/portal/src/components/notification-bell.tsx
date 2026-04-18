@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getApi } from '../lib/api';
+import { useApiQuery, queryKeys } from '../lib/queries';
 
 interface Notification {
   id: string;
@@ -23,26 +25,22 @@ interface ListResponse {
 const POLL_MS = 60_000;
 
 export function NotificationBell({ popupClassName = 'right-0 top-full mt-2' }: { popupClassName?: string }) {
-  const [items, setItems] = useState<Notification[]>([]);
-  const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
 
-  const load = async () => {
-    try {
-      const res = await getApi().get('notifications', { searchParams: { limit: 20 } }).json<ListResponse>();
-      setItems(res.data?.items || []);
-      setUnread(res.data?.meta?.unread || 0);
-    } catch {
-      // silent — bell is best-effort
-    }
-  };
+  const listQ = useApiQuery<ListResponse>(
+    queryKeys.notifications({ limit: 20 }),
+    'notifications?limit=20',
+    true,
+  );
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, POLL_MS);
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: queryKeys.notifications({ limit: 20 }) });
+    }, POLL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [qc]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -52,22 +50,18 @@ export function NotificationBell({ popupClassName = 'right-0 top-full mt-2' }: {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const markOne = async (id: string) => {
-    try {
-      await getApi().patch(`notifications/${id}/read`);
-      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)));
-      setUnread((u) => Math.max(0, u - 1));
-    } catch {}
-  };
+  const items = listQ.data?.data?.items ?? [];
+  const unread = listQ.data?.data?.meta?.unread ?? 0;
 
-  const markAll = async () => {
-    try {
-      await getApi().post('notifications/read-all');
-      const now = new Date().toISOString();
-      setItems((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? now })));
-      setUnread(0);
-    } catch {}
-  };
+  const markOneM = useMutation({
+    mutationFn: (id: string) => getApi().patch(`notifications/${id}/read`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+
+  const markAllM = useMutation({
+    mutationFn: () => getApi().post('notifications/read-all'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+  });
 
   return (
     <div ref={ref} className="relative">
@@ -88,7 +82,11 @@ export function NotificationBell({ popupClassName = 'right-0 top-full mt-2' }: {
           <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
             <span className="text-sm font-semibold text-slate-900">Thông báo</span>
             {unread > 0 && (
-              <button onClick={markAll} className="text-xs font-medium text-brand-600 hover:underline">
+              <button
+                onClick={() => markAllM.mutate()}
+                disabled={markAllM.isPending}
+                className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50"
+              >
                 Đánh dấu đã đọc
               </button>
             )}
@@ -100,7 +98,7 @@ export function NotificationBell({ popupClassName = 'right-0 top-full mt-2' }: {
             {items.map((n) => (
               <button
                 key={n.id}
-                onClick={() => markOne(n.id)}
+                onClick={() => markOneM.mutate(n.id)}
                 className={`block w-full border-b border-slate-50 px-3 py-2.5 text-left text-sm last:border-b-0 hover:bg-slate-50 ${
                   n.read_at ? 'opacity-60' : 'bg-brand-50/30'
                 }`}

@@ -27,7 +27,37 @@ export class DashboardController {
     @Param('branchId') branchId: string,
   ) {
     const isSuperAdmin = user.roles.includes(RoleCode.admin);
-    return this.dashboard.getManagerBranchDashboard(branchId, user.id, isSuperAdmin);
+    return this.dashboard.getManagerBranchDashboard(
+      branchId,
+      user.id,
+      isSuperAdmin,
+      user.managedBranchIds,
+    );
+  }
+
+  @Get('admin/trend')
+  @Roles(RoleCode.admin)
+  getAdminTrend(@Query('days') days?: string) {
+    const n = Math.min(Math.max(parseInt(days ?? '7', 10) || 7, 1), 30);
+    return this.dashboard.getAdminTrend(n);
+  }
+
+  @Get('manager/:branchId/trend')
+  @Roles(RoleCode.admin, RoleCode.manager)
+  getManagerTrend(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Query('days') days?: string,
+  ) {
+    const n = Math.min(Math.max(parseInt(days ?? '7', 10) || 7, 1), 30);
+    const isSuperAdmin = user.roles.includes(RoleCode.admin);
+    return this.dashboard.getManagerTrend(
+      branchId,
+      user.id,
+      isSuperAdmin,
+      user.managedBranchIds,
+      n,
+    );
   }
 
   @Get('anomalies')

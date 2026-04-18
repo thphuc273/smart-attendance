@@ -1,7 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TopNav } from '../../components/nav';
+import { LiveFeed } from '../../components/live-feed';
+import { AiInsightsPanel } from '../../components/ai-insights-panel';
+import { TodayStatusPie, TopBranchesBar, TrendChart } from '../../components/dashboard-charts';
 import { useRequireAuth } from '../../lib/auth';
 import { isAdmin } from '../../lib/api';
 import { useApiQuery, queryKeys } from '../../lib/queries';
@@ -134,6 +137,11 @@ export default function DashboardPage() {
   const error =
     anomaliesQ.error?.message ?? overviewQ.error?.message ?? managerDashQ.error?.message ?? null;
 
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window !== 'undefined') setAccessToken(localStorage.getItem('access_token'));
+  }, []);
+
   if (!user) return null;
 
   return (
@@ -201,6 +209,14 @@ export default function DashboardPage() {
               <h3 className="text-sm font-semibold text-slate-900">Check-in heatmap (giờ VN)</h3>
               <Heatmap data={overview.checkin_heatmap} />
             </div>
+          </section>
+        )}
+
+        {admin && overview && (
+          <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <TrendChart branchId={null} />
+            <TodayStatusPie today={overview.today} />
+            <TopBranchesBar branches={overview.top_branches_late} />
           </section>
         )}
 
@@ -420,6 +436,14 @@ export default function DashboardPage() {
               </AnomalyCard>
             </div>
           )}
+        </section>
+
+        {(admin || currentBranchId) && (
+          <AiInsightsPanel branchId={admin ? null : currentBranchId} />
+        )}
+
+        <section className="mt-6">
+          <LiveFeed token={accessToken} />
         </section>
       </main>
     </TopNav>
