@@ -107,5 +107,5 @@ export function isManager(u: StoredUser | null): boolean {
 export function homeFor(u: StoredUser): string {
   if (isAdmin(u)) return '/admin';
   if (isManager(u)) return '/manager';
-  return '/checkin';
+  return '/(tabs)';
 }

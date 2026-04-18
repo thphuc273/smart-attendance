@@ -11,11 +11,22 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { clearAuth, getApi, getStoredUser, type StoredUser } from '../../lib/api';
+import {
+  disableGeofenceNotify,
+  enableGeofenceNotify,
+  isGeofenceNotifyEnabled,
+} from '../../lib/geofence-notify';
 import { colors, radius } from '../../lib/theme';
+
+interface ZeroTapDevice {
+  id: string;
+  zeroTapEnabled: boolean;
+}
 
 export default function ProfileTab() {
   const router = useRouter();
   const [user, setUser] = useState<StoredUser | null>(null);
+  const [device, setDevice] = useState<ZeroTapDevice | null>(null);
   const [zeroTap, setZeroTap] = useState(false);
   const [geofenceNotify, setGeofenceNotify] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -25,26 +36,62 @@ export default function ProfileTab() {
       setUser(await getStoredUser());
       try {
         const res = await getApi()
-          .get('zero-tap/preference')
-          .json<{ data: { enabled: boolean } }>();
-        setZeroTap(res.data.enabled);
+          .get('attendance/zero-tap/settings/me')
+          .json<{ data: { items: ZeroTapDevice[] } }>();
+        const first = res.data.items[0] ?? null;
+        setDevice(first);
+        setZeroTap(first?.zeroTapEnabled ?? false);
       } catch {
         // ignore if endpoint missing
-      } finally {
-        setLoading(false);
       }
+      setGeofenceNotify(await isGeofenceNotifyEnabled());
+      setLoading(false);
     })();
   }, []);
 
+  const toggleGeofence = useCallback(async (next: boolean) => {
+    setGeofenceNotify(next);
+    if (next) {
+      const res = await enableGeofenceNotify();
+      if (!res.ok) {
+        setGeofenceNotify(false);
+        const reasonMap: Record<string, string> = {
+          expo_go_unsupported:
+            'Expo Go (SDK 53+) không hỗ trợ geofencing + background location. Cần build dev client: chạy `npx expo run:ios` (hoặc `eas build --profile development`).',
+          foreground_denied: 'Bạn chưa cấp quyền vị trí.',
+          background_denied: 'Thiếu quyền vị trí nền — nhắc chấm công sẽ không chạy khi app đóng.',
+          notifications_denied: 'Bạn chưa cấp quyền thông báo.',
+          no_geofences: 'Chi nhánh chưa cấu hình geofence.',
+        };
+        Alert.alert('Không bật được', reasonMap[res.reason ?? ''] ?? res.reason ?? 'Lỗi không xác định.');
+      }
+    } else {
+      await disableGeofenceNotify();
+    }
+  }, []);
+
   const toggleZeroTap = useCallback(async (next: boolean) => {
+    if (!device) {
+      Alert.alert(
+        'Chưa có thiết bị',
+        'Hãy check-in thủ công ít nhất 1 lần trên thiết bị này để đăng ký, sau đó quay lại bật Zero-tap.',
+      );
+      return;
+    }
     setZeroTap(next);
     try {
-      await getApi().post('zero-tap/preference', { json: { enabled: next } });
+      const res = await getApi()
+        .patch('attendance/zero-tap/settings/me', {
+          json: { device_id: device.id, enabled: next, revoke: false },
+        })
+        .json<{ data: ZeroTapDevice }>();
+      setDevice(res.data);
+      setZeroTap(res.data.zeroTapEnabled);
     } catch (err) {
       setZeroTap(!next);
       Alert.alert('Lỗi', (err as Error).message);
     }
-  }, []);
+  }, [device]);
 
   const logout = useCallback(async () => {
     await clearAuth();
@@ -82,7 +129,7 @@ export default function ProfileTab() {
           <Text style={styles.settingTitle}>Nhắc chấm công (geofence)</Text>
           <Text style={styles.settingDesc}>Thông báo khi vào/ra vùng chi nhánh — tiết kiệm pin, debounce 30'.</Text>
         </View>
-        <Switch value={geofenceNotify} onValueChange={setGeofenceNotify} />
+        <Switch value={geofenceNotify} onValueChange={toggleGeofence} />
       </View>
 
       <Pressable onPress={logout} style={styles.logout}>

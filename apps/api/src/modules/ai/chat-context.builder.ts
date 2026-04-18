@@ -1,98 +1,52 @@
 import { Injectable } from '@nestjs/common';
+import { ToolScope } from './tools/tool-definitions';
 
-export type ChatScope = 'admin' | 'manager' | 'employee';
-
-export interface EmployeeContext {
-  scope: 'employee';
+/**
+ * Identity-only chat context. Stats/branch-rollups are fetched on demand via tool
+ * calling — we don't pre-stuff them here. The prompt tells the model what its
+ * boundaries are and what data it's allowed to fetch through tools.
+ */
+export interface ChatIdentity {
+  scope: ToolScope;
   userFullName: string;
-  employeeId: string;
-  primaryBranchName: string | null;
-  recent7Days: { sessions: number; onTime: number; late: number; missingCheckout: number };
-  upcomingShifts: Array<{ date: string; startTime: string; endTime: string }>;
-  remainingLeaveDays: number | null;
+  /** Present for employee/manager/admin when the user has an employee record — */
+  /** the self tools (get_my_*) can always resolve via userId. */
+  employeeCode?: string;
+  primaryBranchName?: string | null;
+  /** Manager scope only: list of branches this user can query through tools. */
+  managedBranches?: Array<{ id: string; name: string }>;
+  /** YYYY-MM-DD in Asia/Ho_Chi_Minh — helps model resolve "tuần này / hôm nay" */
+  vnToday: string;
 }
-
-export interface ManagerContext {
-  scope: 'manager';
-  userFullName: string;
-  managedBranches: Array<{ id: string; name: string }>;
-  today: { sessions: number; onTime: number; late: number; missingCheckout: number; absent: number };
-  last7Days: { sessions: number; onTime: number; late: number; onTimeRatePct: number };
-  topLate: Array<{ name: string; lateCount: number; branchName: string }>;
-}
-
-export interface AdminContext {
-  scope: 'admin';
-  userFullName: string;
-  totals: { employees: number; branches: number };
-  today: { sessions: number; onTime: number; late: number; missingCheckout: number; absent: number };
-  last7Days: { sessions: number; onTime: number; late: number; onTimeRatePct: number };
-  topLateBranches: Array<{ name: string; lateCount: number }>;
-}
-
-export type ChatContext = EmployeeContext | ManagerContext | AdminContext;
 
 @Injectable()
 export class ChatContextBuilder {
-  buildSystemPrompt(ctx: ChatContext): string {
-    const guardrails = [
-      'Bạn là FinOS HR Assistant — trợ lý AI trong hệ thống chấm công FinOS.',
-      'Trả lời bằng tiếng Việt, ngắn gọn, chuyên nghiệp. CHỈ dùng dữ liệu dưới đây, KHÔNG bịa số liệu, KHÔNG tiết lộ dữ liệu ngoài phạm vi cho phép.',
-      'Nếu người dùng hỏi thông tin ngoài scope (VD: employee hỏi dữ liệu chi nhánh khác; manager hỏi toàn hệ thống) → từ chối lịch sự.',
-      'Nếu câu hỏi không liên quan chấm công/nhân sự → trả lời ngắn rồi hướng về đúng phạm vi.',
-      '',
-    ].join('\n');
+  buildSystemPrompt(ctx: ChatIdentity): string {
+    const rules = [
+      'Bạn là FinOS HR Assistant — trợ lý chấm công trong hệ thống FinOS Smart Attendance.',
+      'Trả lời bằng tiếng Việt, ngắn gọn, chuyên nghiệp.',
+      'BẮT BUỘC gọi tool (function call) để lấy số liệu thực — KHÔNG bịa số, KHÔNG đoán. Nếu người dùng hỏi tới dữ liệu mà chưa có tool phù hợp → nói rõ "chưa hỗ trợ" thay vì đoán.',
+      'Nếu câu hỏi ngoài phạm vi quyền (employee hỏi chi nhánh khác, manager hỏi chi nhánh ngoài scope) → từ chối lịch sự.',
+      `Hôm nay là ${ctx.vnToday} (Asia/Ho_Chi_Minh). Với các mốc thời gian tương đối ("tuần này", "tháng này"), tự tính date_from/date_to từ mốc đó.`,
+    ];
+
+    const identity: string[] = [`Vai trò: ${ctx.scope.toUpperCase()}`, `Người dùng: ${ctx.userFullName}`];
+    if (ctx.employeeCode) identity.push(`Mã NV: ${ctx.employeeCode}`);
+    if (ctx.primaryBranchName) identity.push(`Chi nhánh chính: ${ctx.primaryBranchName}`);
 
     if (ctx.scope === 'employee') {
-      return (
-        guardrails +
-        [
-          `Role: EMPLOYEE (chỉ được xem dữ liệu của chính mình)`,
-          `Nhân viên: ${ctx.userFullName} (id=${ctx.employeeId})`,
-          `Chi nhánh: ${ctx.primaryBranchName ?? 'chưa gán'}`,
-          `7 ngày gần nhất: ${ctx.recent7Days.sessions} phiên, đúng giờ ${ctx.recent7Days.onTime}, muộn ${ctx.recent7Days.late}, thiếu check-out ${ctx.recent7Days.missingCheckout}`,
-          ctx.remainingLeaveDays !== null ? `Phép còn lại: ${ctx.remainingLeaveDays} ngày` : '',
-          ctx.upcomingShifts.length
-            ? `Ca sắp tới: ${ctx.upcomingShifts.map((s) => `${s.date} ${s.startTime}-${s.endTime}`).join('; ')}`
-            : 'Chưa có ca sắp tới trong lịch.',
-        ]
-          .filter(Boolean)
-          .join('\n')
-      );
+      identity.push('Phạm vi dữ liệu: CHÍNH BẠN. Dùng các tool `get_my_*`.');
+    } else if (ctx.scope === 'manager') {
+      const list = ctx.managedBranches?.length
+        ? ctx.managedBranches.map((b) => `${b.name} (${b.id})`).join('; ')
+        : '(chưa gán)';
+      identity.push(`Phạm vi dữ liệu: các chi nhánh bạn quản lý — ${list}.`);
+      identity.push('Dùng `get_my_*` cho dữ liệu cá nhân, `get_branch_*` / `list_*` với branch_id trong danh sách trên.');
+    } else {
+      identity.push('Phạm vi dữ liệu: TOÀN HỆ THỐNG.');
+      identity.push('Dùng `get_system_overview` / `compare_branches` cho số liệu toàn hệ thống; `get_branch_*` cho từng chi nhánh.');
     }
 
-    if (ctx.scope === 'manager') {
-      return (
-        guardrails +
-        [
-          `Role: MANAGER (chỉ được xem dữ liệu các chi nhánh mình quản lý)`,
-          `Người dùng: ${ctx.userFullName}`,
-          `Chi nhánh quản lý: ${ctx.managedBranches.map((b) => b.name).join(', ') || '(chưa gán)'}`,
-          `Hôm nay: ${ctx.today.sessions} phiên — đúng giờ ${ctx.today.onTime}, muộn ${ctx.today.late}, chưa check-out ${ctx.today.missingCheckout}, vắng ${ctx.today.absent}`,
-          `7 ngày: ${ctx.last7Days.sessions} phiên, đúng giờ ${ctx.last7Days.onTime} (${ctx.last7Days.onTimeRatePct}%), muộn ${ctx.last7Days.late}`,
-          ctx.topLate.length
-            ? `Top NV đi muộn 7 ngày: ${ctx.topLate.map((t) => `${t.name} @ ${t.branchName} (${t.lateCount})`).join('; ')}`
-            : '',
-        ]
-          .filter(Boolean)
-          .join('\n')
-      );
-    }
-
-    return (
-      guardrails +
-      [
-        `Role: ADMIN (được xem toàn hệ thống)`,
-        `Người dùng: ${ctx.userFullName}`,
-        `Tổng: ${ctx.totals.employees} nhân viên, ${ctx.totals.branches} chi nhánh`,
-        `Hôm nay: ${ctx.today.sessions} phiên — đúng giờ ${ctx.today.onTime}, muộn ${ctx.today.late}, chưa check-out ${ctx.today.missingCheckout}, vắng ${ctx.today.absent}`,
-        `7 ngày: ${ctx.last7Days.sessions} phiên, đúng giờ ${ctx.last7Days.onTime} (${ctx.last7Days.onTimeRatePct}%), muộn ${ctx.last7Days.late}`,
-        ctx.topLateBranches.length
-          ? `Top chi nhánh đi muộn 7 ngày: ${ctx.topLateBranches.map((b) => `${b.name} (${b.lateCount})`).join('; ')}`
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
-    );
+    return [...rules, '', ...identity].join('\n');
   }
 }

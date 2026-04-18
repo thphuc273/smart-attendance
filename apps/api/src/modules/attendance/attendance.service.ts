@@ -638,6 +638,43 @@ export class AttendanceService {
 
   // ─── STREAK ────────────────────────────────────────────────
 
+  async getMyGeofences(employeeUserId: string) {
+    const employee = await this.prisma.employee.findUnique({
+      where: { userId: employeeUserId },
+      include: {
+        primaryBranch: { select: { id: true, name: true } },
+        assignments: {
+          where: {
+            effectiveFrom: { lte: new Date() },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
+          },
+          include: { branch: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!employee) return { branches: [] };
+
+    const branchMap = new Map<string, { id: string; name: string }>();
+    branchMap.set(employee.primaryBranchId, employee.primaryBranch);
+    for (const a of employee.assignments) {
+      branchMap.set(a.branchId, a.branch);
+    }
+
+    const configs = await this.branchesService.loadConfigsCached(Array.from(branchMap.keys()));
+    return {
+      branches: configs.map((b) => ({
+        id: b.id,
+        name: b.name,
+        geofences: b.geofences.map((g) => ({
+          id: g.id,
+          latitude: Number(g.centerLat),
+          longitude: Number(g.centerLng),
+          radius_m: g.radiusMeters,
+        })),
+      })),
+    };
+  }
+
   async getMyStreak(employeeUserId: string) {
     const employee = await this.prisma.employee.findUniqueOrThrow({
       where: { userId: employeeUserId },

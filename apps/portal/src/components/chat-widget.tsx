@@ -134,13 +134,39 @@ export function ChatWidget({ userLabel }: { userLabel: string }) {
               <p className="text-sm font-semibold">FinOS Assistant</p>
               <p className="text-xs opacity-90">{userLabel}</p>
             </div>
-            <button
-              onClick={() => setOpen(false)}
-              className="rounded-full p-1 text-white/80 hover:bg-white/10 hover:text-white"
-              aria-label="Đóng"
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={async () => {
+                  if (streaming) return;
+                  const token = getAccessToken();
+                  if (!token) return;
+                  if (!confirm('Xoá đoạn chat hiện tại và bắt đầu đoạn mới?')) return;
+                  try {
+                    await fetch(`${API_BASE_URL}/ai/chat/history`, {
+                      method: 'DELETE',
+                      headers: { authorization: `Bearer ${token}` },
+                    });
+                  } catch {
+                    /* ignore — clear locally anyway */
+                  }
+                  setMessages([]);
+                  setLoadedHistory(true);
+                }}
+                disabled={streaming}
+                className="rounded-full p-1 text-white/80 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                aria-label="Đoạn chat mới"
+                title="Đoạn chat mới"
+              >
+                ✨
+              </button>
+              <button
+                onClick={() => setOpen(false)}
+                className="rounded-full p-1 text-white/80 hover:bg-white/10 hover:text-white"
+                aria-label="Đóng"
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
           {/* Messages */}
@@ -153,18 +179,25 @@ export function ChatWidget({ userLabel }: { userLabel: string }) {
                 </p>
               </div>
             )}
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
-                  m.role === 'user'
-                    ? 'ml-auto bg-brand-500 text-white'
-                    : 'mr-auto bg-white text-slate-700 ring-1 ring-slate-200'
-                }`}
-              >
-                {m.content || <span className="text-slate-400">…</span>}
-              </div>
-            ))}
+            {messages.map((m) => {
+              const isPending = m.role === 'assistant' && !m.content && streaming;
+              if (isPending) return <ThinkingBubble key={m.id} />;
+              return (
+                <div
+                  key={m.id}
+                  className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
+                    m.role === 'user'
+                      ? 'ml-auto bg-brand-500 text-white'
+                      : 'mr-auto bg-white text-slate-700 ring-1 ring-slate-200'
+                  }`}
+                >
+                  {m.content}
+                  {m.role === 'assistant' && streaming && m.content && (
+                    <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-brand-500 align-middle" />
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Input */}
@@ -194,5 +227,22 @@ export function ChatWidget({ userLabel }: { userLabel: string }) {
         </div>
       )}
     </>
+  );
+}
+
+function ThinkingBubble() {
+  return (
+    <div className="mr-auto flex max-w-[85%] items-center gap-2 rounded-2xl bg-white px-3 py-2.5 text-sm ring-1 ring-slate-200">
+      <span className="relative flex h-5 w-5 items-center justify-center">
+        <span className="absolute inset-0 animate-ping rounded-full bg-brand-400/40" />
+        <span className="relative text-sm">🤖</span>
+      </span>
+      <span className="text-xs text-slate-500">Đang suy nghĩ</span>
+      <span className="flex gap-1">
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400 [animation-delay:-0.3s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-500 [animation-delay:-0.15s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-500" />
+      </span>
+    </div>
   );
 }

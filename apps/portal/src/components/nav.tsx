@@ -19,6 +19,7 @@ const NAV_ITEMS: { href: string; label: string; icon: string; role?: Role }[] = 
   { href: '/schedules', label: 'Ca làm', icon: '⏰', role: 'admin' },
   { href: '/branches', label: 'Chi nhánh', icon: '🏢', role: 'admin' },
   { href: '/audit-logs', label: 'Audit', icon: '🔍', role: 'admin' },
+  { href: '/chat', label: 'Trợ lý AI', icon: '🤖' },
 ];
 
 /**

@@ -327,7 +327,7 @@ export default function CheckinScreen() {
           )}
         </View>
 
-        <Pressable onPress={() => router.push('/history' as never)} style={styles.historyLink}>
+        <Pressable onPress={() => router.push('/(tabs)/history' as never)} style={styles.historyLink}>
           <Text style={styles.historyLinkText}>📅 Xem lịch sử 14 ngày</Text>
           <Text style={styles.historyArrow}>→</Text>
         </Pressable>

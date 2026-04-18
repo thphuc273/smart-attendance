@@ -3,17 +3,14 @@ import { AiChatRole, AiInsightScope, AttendanceSessionStatus, RoleCode } from '@
 import { Observable } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { GeminiClient, GeminiMessage } from './gemini.client';
+import { GeminiClient, GeminiContent, GeminiMessage, GeminiPart } from './gemini.client';
 import { InsightPromptBuilder, InsightStats } from './insight-prompt.builder';
-import {
-  AdminContext,
-  ChatContext,
-  ChatContextBuilder,
-  EmployeeContext,
-  ManagerContext,
-} from './chat-context.builder';
+import { ChatContextBuilder, ChatIdentity } from './chat-context.builder';
+import { ToolExecutor } from './tools/tool-executor';
+import { toolsForScope, ToolScope } from './tools/tool-definitions';
 
 const INSIGHT_TTL_MS = 60 * 60 * 1000;
+const MAX_TOOL_ITERATIONS = 6;
 
 function mondayUtc(date: Date): Date {
   const vnMs = date.getTime() + 7 * 3600 * 1000;
@@ -27,6 +24,11 @@ function addDays(d: Date, days: number): Date {
   return new Date(d.getTime() + days * 86_400_000);
 }
 
+function vnTodayString(): string {
+  const vn = new Date(Date.now() + 7 * 3600 * 1000);
+  return vn.toISOString().slice(0, 10);
+}
+
 @Injectable()
 export class AiService {
   constructor(
@@ -34,6 +36,7 @@ export class AiService {
     private readonly gemini: GeminiClient,
     private readonly insightBuilder: InsightPromptBuilder,
     private readonly chatContext: ChatContextBuilder,
+    private readonly toolExecutor: ToolExecutor,
   ) {}
 
   // ---------- Insights ----------
@@ -69,8 +72,8 @@ export class AiService {
     const weekStart = weekStartInput ? new Date(weekStartInput + 'T00:00:00Z') : mondayUtc(new Date());
     const weekEnd = addDays(weekStart, 6);
 
-    const cached = await this.prisma.aiInsightCache.findUnique({
-      where: { scope_scopeId_weekStart: { scope, scopeId, weekStart } as never },
+    const cached = await this.prisma.aiInsightCache.findFirst({
+      where: { scope, scopeId, weekStart },
     });
     if (cached && cached.expiresAt > new Date()) {
       return {
@@ -97,11 +100,16 @@ export class AiService {
     }
 
     const expiresAt = new Date(Date.now() + INSIGHT_TTL_MS);
-    await this.prisma.aiInsightCache.upsert({
-      where: { scope_scopeId_weekStart: { scope, scopeId, weekStart } as never },
-      create: { scope, scopeId, weekStart, payload: payload as never, expiresAt },
-      update: { payload: payload as never, generatedAt: new Date(), expiresAt },
-    });
+    if (cached) {
+      await this.prisma.aiInsightCache.update({
+        where: { id: cached.id },
+        data: { payload: payload as never, generatedAt: new Date(), expiresAt },
+      });
+    } else {
+      await this.prisma.aiInsightCache.create({
+        data: { scope, scopeId, weekStart, payload: payload as never, expiresAt },
+      });
+    }
 
     return {
       cached: false,
@@ -180,6 +188,10 @@ export class AiService {
 
   // ---------- Chat ----------
 
+  async clearChatHistory(user: AuthenticatedUser) {
+    await this.prisma.aiChatMessage.deleteMany({ where: { userId: user.id } });
+  }
+
   async getChatHistory(user: AuthenticatedUser, limit = 50) {
     const rows = await this.prisma.aiChatMessage.findMany({
       where: { userId: user.id },
@@ -199,33 +211,81 @@ export class AiService {
       let closed = false;
       const run = async () => {
         try {
-          const ctx = await this.buildContextForUser(user);
+          const identity = await this.buildIdentity(user);
+          const systemPrompt = this.chatContext.buildSystemPrompt(identity);
+          const tools = toolsForScope(identity.scope);
+
           const history = await this.prisma.aiChatMessage.findMany({
             where: { userId: user.id },
             orderBy: { createdAt: 'desc' },
             take: 20,
           });
-          const messages: GeminiMessage[] = [
-            { role: 'system', content: this.chatContext.buildSystemPrompt(ctx) },
-            ...history
-              .reverse()
-              .map((m) => ({ role: m.role === AiChatRole.assistant ? 'model' : 'user', content: m.content }) as GeminiMessage),
-            { role: 'user', content: message },
+          const historyContents: GeminiContent[] = history
+            .reverse()
+            .map((m) => ({
+              role: m.role === AiChatRole.assistant ? 'model' : 'user',
+              parts: [{ text: m.content }],
+            }));
+          const contents: GeminiContent[] = [
+            ...historyContents,
+            { role: 'user', parts: [{ text: message }] },
           ];
 
           await this.prisma.aiChatMessage.create({
             data: { userId: user.id, role: AiChatRole.user, content: message },
           });
 
-          let full = '';
-          for await (const chunk of this.gemini.stream(messages)) {
+          // --- Tool-call loop ---
+          let finalText = '';
+          for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
             if (closed) return;
-            full += chunk;
+            const { parts, stub } = await this.gemini.generateWithTools({
+              system: systemPrompt,
+              contents,
+              tools,
+            });
+            const fnCalls = parts.filter(
+              (p): p is Extract<GeminiPart, { functionCall: unknown }> => 'functionCall' in p,
+            );
+            const texts = parts
+              .filter((p): p is Extract<GeminiPart, { text: string }> => 'text' in p && typeof p.text === 'string')
+              .map((p) => p.text);
+
+            if (fnCalls.length === 0 || stub) {
+              finalText = texts.join('');
+              break;
+            }
+
+            // 1) Persist the model turn (with function calls) into contents.
+            contents.push({ role: 'model', parts });
+
+            // 2) Execute each tool; append a user turn with functionResponse parts.
+            const responseParts: GeminiPart[] = [];
+            for (const fc of fnCalls) {
+              if (closed) return;
+              subscriber.next({
+                data: { tool: fc.functionCall.name },
+                type: 'tool',
+              } as MessageEvent);
+              const result = await this.toolExecutor.run(user, fc.functionCall.name, fc.functionCall.args ?? {});
+              responseParts.push({
+                functionResponse: { name: fc.functionCall.name, response: { result } },
+              });
+            }
+            contents.push({ role: 'user', parts: responseParts });
+          }
+
+          if (!finalText) {
+            finalText = '⚠️ Không lấy được câu trả lời sau nhiều lần gọi công cụ. Vui lòng hỏi lại.';
+          }
+
+          for await (const chunk of this.gemini.fakeStream(finalText)) {
+            if (closed) return;
             subscriber.next({ data: { delta: chunk } } as MessageEvent);
           }
 
           await this.prisma.aiChatMessage.create({
-            data: { userId: user.id, role: AiChatRole.assistant, content: full },
+            data: { userId: user.id, role: AiChatRole.assistant, content: finalText },
           });
 
           subscriber.next({ data: { done: true }, type: 'done' } as MessageEvent);
@@ -245,175 +305,37 @@ export class AiService {
     });
   }
 
-  private async buildContextForUser(user: AuthenticatedUser): Promise<ChatContext> {
-    const isAdmin = user.roles.includes(RoleCode.admin);
-    const isManager = user.roles.includes(RoleCode.manager);
-    if (isAdmin) return this.buildAdminContext(user);
-    if (isManager) return this.buildManagerContext(user);
-    return this.buildEmployeeContext(user);
-  }
+  private async buildIdentity(user: AuthenticatedUser): Promise<ChatIdentity> {
+    const scope: ToolScope = user.roles.includes(RoleCode.admin)
+      ? 'admin'
+      : user.roles.includes(RoleCode.manager)
+        ? 'manager'
+        : 'employee';
 
-  private async buildEmployeeContext(user: AuthenticatedUser): Promise<EmployeeContext> {
-    const employee = await this.prisma.employee.findFirst({
-      where: { userId: user.id },
-      include: { primaryBranch: { select: { name: true } }, user: { select: { fullName: true } } },
-    });
-    if (!employee) throw new NotFoundException({ code: 'EMPLOYEE_NOT_FOUND' });
-
-    const since = new Date(Date.now() - 7 * 86_400_000);
-    const sessions = await this.prisma.attendanceSession.findMany({
-      where: { employeeId: employee.id, checkInAt: { gte: since } },
-      select: { status: true, checkOutAt: true },
-    });
-
-    return {
-      scope: 'employee',
-      userFullName: employee.user.fullName,
-      employeeId: employee.id,
-      primaryBranchName: employee.primaryBranch?.name ?? null,
-      recent7Days: {
-        sessions: sessions.length,
-        onTime: sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length,
-        late: sessions.filter((s) => s.status === AttendanceSessionStatus.late).length,
-        missingCheckout: sessions.filter((s) => s.checkOutAt === null).length,
-      },
-      upcomingShifts: [],
-      remainingLeaveDays: null,
-    };
-  }
-
-  private async buildManagerContext(user: AuthenticatedUser): Promise<ManagerContext> {
-    const branchIds = user.managedBranchIds;
-    const branches = branchIds.length
-      ? await this.prisma.branch.findMany({
-          where: { id: { in: branchIds } },
-          select: { id: true, name: true },
-        })
-      : [];
-
-    const todayStart = startOfVNToday();
-    const todayEnd = addDays(todayStart, 1);
-    const weekAgo = addDays(todayStart, -6);
-
-    const filter = { branchId: { in: branchIds.length ? branchIds : ['00000000-0000-0000-0000-000000000000'] } };
-
-    const [todaySessions, weekSessions] = await Promise.all([
-      this.prisma.attendanceSession.findMany({
-        where: { ...filter, checkInAt: { gte: todayStart, lt: todayEnd } },
-        select: { status: true, checkOutAt: true },
+    const [userRow, employee, branches] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { fullName: true },
       }),
-      this.prisma.attendanceSession.findMany({
-        where: { ...filter, checkInAt: { gte: weekAgo, lt: todayEnd } },
-        select: { status: true },
+      this.prisma.employee.findFirst({
+        where: { userId: user.id },
+        select: { employeeCode: true, primaryBranch: { select: { name: true } } },
       }),
+      scope === 'manager' && user.managedBranchIds.length
+        ? this.prisma.branch.findMany({
+            where: { id: { in: user.managedBranchIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
     ]);
 
-    const topLateRaw = await this.prisma.attendanceSession.groupBy({
-      by: ['employeeId'],
-      where: { ...filter, checkInAt: { gte: weekAgo, lt: todayEnd }, status: AttendanceSessionStatus.late },
-      _count: { _all: true },
-      orderBy: { _count: { employeeId: 'desc' } },
-      take: 5,
-    });
-    const topEmps = await this.prisma.employee.findMany({
-      where: { id: { in: topLateRaw.map((r) => r.employeeId) } },
-      include: { user: { select: { fullName: true } }, primaryBranch: { select: { name: true } } },
-    });
-
-    const userRecord = await this.prisma.user.findUnique({
-      where: { id: user.id },
-      select: { fullName: true },
-    });
-
     return {
-      scope: 'manager',
-      userFullName: userRecord?.fullName ?? user.email,
-      managedBranches: branches,
-      today: countToday(todaySessions),
-      last7Days: countWeek(weekSessions),
-      topLate: topLateRaw.map((r) => {
-        const emp = topEmps.find((e) => e.id === r.employeeId);
-        return {
-          name: emp?.user.fullName ?? '—',
-          branchName: emp?.primaryBranch?.name ?? '—',
-          lateCount: r._count._all,
-        };
-      }),
+      scope,
+      userFullName: userRow?.fullName ?? user.email,
+      employeeCode: employee?.employeeCode,
+      primaryBranchName: employee?.primaryBranch?.name ?? null,
+      managedBranches: scope === 'manager' ? branches : undefined,
+      vnToday: vnTodayString(),
     };
   }
-
-  private async buildAdminContext(user: AuthenticatedUser): Promise<AdminContext> {
-    const todayStart = startOfVNToday();
-    const todayEnd = addDays(todayStart, 1);
-    const weekAgo = addDays(todayStart, -6);
-
-    const [employees, branches, todaySessions, weekSessions, topLateBranches] = await Promise.all([
-      this.prisma.employee.count(),
-      this.prisma.branch.count(),
-      this.prisma.attendanceSession.findMany({
-        where: { checkInAt: { gte: todayStart, lt: todayEnd } },
-        select: { status: true, checkOutAt: true },
-      }),
-      this.prisma.attendanceSession.findMany({
-        where: { checkInAt: { gte: weekAgo, lt: todayEnd } },
-        select: { status: true },
-      }),
-      this.prisma.attendanceSession.groupBy({
-        by: ['branchId'],
-        where: { checkInAt: { gte: weekAgo, lt: todayEnd }, status: AttendanceSessionStatus.late },
-        _count: { _all: true },
-        orderBy: { _count: { branchId: 'desc' } },
-        take: 5,
-      }),
-    ]);
-
-    const branchRecords = await this.prisma.branch.findMany({
-      where: { id: { in: topLateBranches.map((r) => r.branchId) } },
-      select: { id: true, name: true },
-    });
-    const userRecord = await this.prisma.user.findUnique({
-      where: { id: user.id },
-      select: { fullName: true },
-    });
-
-    return {
-      scope: 'admin',
-      userFullName: userRecord?.fullName ?? user.email,
-      totals: { employees, branches },
-      today: countToday(todaySessions),
-      last7Days: countWeek(weekSessions),
-      topLateBranches: topLateBranches.map((r) => ({
-        name: branchRecords.find((b) => b.id === r.branchId)?.name ?? '—',
-        lateCount: r._count._all,
-      })),
-    };
-  }
-}
-
-function startOfVNToday(): Date {
-  const nowMs = Date.now() + 7 * 3600 * 1000;
-  const vn = new Date(nowMs);
-  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate()) - 7 * 3600 * 1000);
-}
-
-function countToday(sessions: Array<{ status: AttendanceSessionStatus; checkOutAt: Date | null }>) {
-  return {
-    sessions: sessions.length,
-    onTime: sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length,
-    late: sessions.filter((s) => s.status === AttendanceSessionStatus.late).length,
-    missingCheckout: sessions.filter((s) => s.checkOutAt === null).length,
-    absent: sessions.filter((s) => s.status === AttendanceSessionStatus.absent).length,
-  };
-}
-
-function countWeek(sessions: Array<{ status: AttendanceSessionStatus }>) {
-  const total = sessions.length;
-  const onTime = sessions.filter((s) => s.status === AttendanceSessionStatus.on_time).length;
-  const late = sessions.filter((s) => s.status === AttendanceSessionStatus.late).length;
-  return {
-    sessions: total,
-    onTime,
-    late,
-    onTimeRatePct: total ? Math.round((onTime / total) * 100) : 0,
-  };
 }

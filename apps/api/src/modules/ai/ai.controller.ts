@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Sse, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Post, Query, Sse, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -22,6 +22,12 @@ export class AiController {
   @Get('chat/history')
   history(@CurrentUser() user: AuthenticatedUser, @Query() q: ChatHistoryQueryDto) {
     return this.ai.getChatHistory(user, q.limit ?? 50);
+  }
+
+  @Delete('chat/history')
+  @HttpCode(204)
+  async clearHistory(@CurrentUser() user: AuthenticatedUser): Promise<void> {
+    await this.ai.clearChatHistory(user);
   }
 
   @Post('chat')
