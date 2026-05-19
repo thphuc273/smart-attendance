@@ -46,7 +46,8 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       API_PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-sa_user}:${POSTGRES_PASSWORD:-sa_password_change_me}@postgres:5432/${POSTGRES_DB:-smart_attendance}?schema=public
-      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-in-prod}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-in-prod}

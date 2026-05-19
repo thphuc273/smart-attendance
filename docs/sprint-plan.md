@@ -370,6 +370,14 @@
 - [x] Fix 18/19 finding (C1–C15 + H2–H4); thêm model `RefreshToken` (revocation + rotation + reuse-detection).
 - [ ] **H1** — JWT trong `localStorage` portal → hoãn sang PR riêng (kế hoạch httpOnly cookie config-driven).
 
+### Session #022 — 2026-05-20 — Seed data + fix AI insight + Docker hardening
+- [x] **Dữ liệu mẫu**: 5 chi nhánh, 1 manager/chi nhánh, **100 NV (20/chi nhánh)**, **90 ngày** lịch sử chấm công weekday (nâng từ 36 NV / 7 ngày). Reseed DB remote: 6400 phiên / 13153 event.
+- [x] **Bug seed date loop**: `workDate @db.Date` serialize theo UTC + loop kết thúc ở "hôm qua" → AI insight tuần hiện 0 phiên. Fix: anchor `Date.UTC(...)`, loop gồm cả hôm nay.
+- [x] **Bug `ai_insights_cache.scopeId`**: nullable → `@@unique` không chặn dòng admin trùng (Postgres NULL distinct). Fix: non-nullable + nil-UUID sentinel, `findUnique`+`upsert`.
+- [x] **Docker**: fix `make docker-up` (corepack signature — `npm i -g corepack@latest`); CMD đổi `migrate deploy` → `db push`; `REDIS_URL` → `REDIS_HOST`/`PORT`. Rebuild image API.
+- [ ] Docker Postgres volume còn giữ seed cũ — `docker compose down -v` trước khi chạy `sa-api` sạch.
+- [ ] `ai_insights_cache` upsert chưa nguyên tử `ON CONFLICT` — race admin-scope có thể `P2002` (hiếm, sau `@Throttle` 60/h).
+
 ---
 
 ## Cross-cutting — Daily ritual (mỗi ngày cuối)
