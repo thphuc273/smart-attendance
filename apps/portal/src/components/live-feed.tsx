@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 
 interface LiveEvent {
   type: 'check_in' | 'check_out';
@@ -19,28 +20,51 @@ const MAX_ITEMS = 20;
 export function LiveFeed({ token }: { token: string | null }) {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [connected, setConnected] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!token) return;
     const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
-    // EventSource does not support custom headers in standard impl — use query token.
-    const url = `${base}/dashboard/live?access_token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url, { withCredentials: false });
-    esRef.current = es;
-    es.addEventListener('attendance', (e) => {
-      try {
-        const ev = JSON.parse((e as MessageEvent).data) as LiveEvent;
-        setEvents((prev) => [ev, ...prev].slice(0, MAX_ITEMS));
-      } catch {
-        /* ignore */
-      }
+    const ctrl = new AbortController();
+    // fetch-event-source carries the JWT in the Authorization header. The
+    // native EventSource cannot set headers, which previously forced the
+    // token into the URL where it leaks to access logs, browser history
+    // and the Referer header.
+    let fatal = false;
+
+    fetchEventSource(`${base}/dashboard/live`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+      openWhenHidden: true,
+      onopen: async (res) => {
+        if (res.ok) {
+          setConnected(true);
+          return;
+        }
+        // 401/403 etc. — the token is bad; abort instead of hammering retries.
+        fatal = true;
+        throw new Error(`SSE refused (${res.status})`);
+      },
+      onmessage: (ev) => {
+        if (ev.event !== 'attendance') return; // skip heartbeats
+        try {
+          const parsed = JSON.parse(ev.data) as LiveEvent;
+          setEvents((prev) => [parsed, ...prev].slice(0, MAX_ITEMS));
+        } catch {
+          /* ignore malformed frame */
+        }
+      },
+      onerror: (err) => {
+        setConnected(false);
+        if (fatal) throw err; // stop retrying on a fatal auth error
+        // otherwise return void → library reconnects with backoff
+      },
+      onclose: () => setConnected(false),
+    }).catch(() => {
+      /* aborted or fatal — state already reflects it */
     });
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
+
     return () => {
-      es.close();
-      esRef.current = null;
+      ctrl.abort();
     };
   }, [token]);
 

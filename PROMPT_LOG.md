@@ -1912,6 +1912,94 @@ Tại sao không streaming trong loop: Gemini streaming khó tách functionCall 
 
 ---
 
+## Session #021 — 2026-05-19 — Security audit toàn codebase: fix 19 finding (C1–C15 + H1–H4)
+
+### Prompt gốc (theo thứ tự)
+
+> **Prompt 1:** "Kiểm tra toàn bộ codebase xem có critical bug nào không"
+>
+> **Prompt 2** (kèm output một lượt audit code-level "Audit Review — Code-Level Verification"): "thực hiện fix các bug"
+>
+> **Prompt 3** (chọn scope khi AI hỏi giới hạn phạm vi): "Tất cả 19 finding"
+>
+> **Prompt 4** (trả lời AskUserQuestion về H1): Deployment topology = *"Not sure / varies"*; H1 timing = *"Defer to a separate PR"*
+>
+> **Prompt 5:** "ghi chú lại tất cả các prompt vào prompt log" → chính session entry này.
+
+### 1. Bối cảnh
+
+Lượt audit code-level phát hiện **19 finding**, chia 2 mức: **C1–C15 (Critical)** + **H1–H4 (High)**. User chọn fix **toàn bộ 19**. AI làm tự động các fix backend/surgical, riêng **H1** (portal localStorage → httpOnly cookie) cần quyết định về deployment topology + CSRF nên hỏi user trước.
+
+### 2. Danh sách finding & cách fix
+
+| # | Finding | Fix | File chính |
+|---|---|---|---|
+| C1 | 3 endpoint employee assignment/device không branch-scope | Thêm kiểm tra branch scope cho manager | `employees.controller.ts`, `employees.service.ts` |
+| C2 | Endpoint revoke-zero-tap không branch-scope | Branch-scope hoá endpoint | `zero-tap.controller.ts`, `zero-tap.service.ts` |
+| C3 | `BranchScopeGuard` fail-open khi thiếu scope | Đổi thành **fail-closed** — thiếu thông tin → deny | `branch-scope.guard.ts` |
+| C4 | Không có refresh token revocation (logout là no-op) | Model `RefreshToken` + rotation + reuse detection + logout thật (xem mục 3) | `schema.prisma`, `auth.service.ts`, `auth.controller.ts` |
+| C5 | Sai timezone khi phân loại schedule (on_time/late) | Chuẩn hoá UTC+7 | `common/utils/schedule.ts` |
+| C6 | Manual check-in không tăng `successfulCheckinCount` | Increment counter (điều kiện warm-up zero-tap) | `attendance.service.ts` |
+| C7 | Cờ `mock_location` lệch chuỗi giữa nơi set & nơi đọc | Đồng bộ string flag | `common/utils/trust-score.ts` |
+| C8 | Check-in đồng thời → 500 thay vì 409 | Bắt Prisma P2002 → trả 409 Conflict | `attendance.service.ts` |
+| C9 | CSV export dính formula injection | Sanitize cell bắt đầu `= + - @` | `reports/processors/report-export.processor.ts` |
+| C10 | Query report export không giới hạn | Giới hạn khoảng ngày / số dòng | `reports.service.ts` |
+| C11 | Missing-checkout: close session + notify không atomic | Bọc trong `$transaction` | `reports/processors/missing-checkout.processor.ts` |
+| C12 | Access token lộ trên URL của SSE | JWT strategy chỉ nhận Authorization header; portal đổi sang `@microsoft/fetch-event-source` | `jwt.strategy.ts`, `live-feed.tsx` |
+| C13 | Kiosk QR render qua dịch vụ ảnh QR bên thứ ba (lộ token) | Render client-side bằng `qrcode.react` | `kiosk/[branchId]/page.tsx` |
+| C14 | API trả toạ độ geofence cho employee | Bỏ toạ độ khỏi response cho employee | `employees.service.ts` |
+| C15 | Check-in double-submit (state async không chặn kịp) | `useRef` inFlight guard đồng bộ | `mobile/app/checkin.tsx`, `portal/.../checkin/page.tsx` |
+| H1 | Portal lưu JWT trong `localStorage` (XSS đọc được) | **DEFERRED** sang PR riêng — kế hoạch ở mục 5 | — |
+| H2 | Device throttler key theo device, dễ né | Key theo authenticated user | `device-throttler.guard.ts` |
+| H3 | JWT secret không ép độ dài tối thiểu | Validate min length trong env schema | `config/env.validation.ts` |
+| H4 | Background geofence task vẫn chạy sau logout | `logout()` gọi `disableGeofenceNotify()` trước khi clear auth | `mobile/app/(tabs)/profile.tsx` |
+
+### 3. Chi tiết C4 — Refresh token revocation
+
+Trước: `logout()` là no-op (`// MVP: stateless JWT`), refresh token không thể thu hồi.
+
+Thiết kế (đã được advisor review):
+- Model Prisma mới `RefreshToken` — 1 row / token, key theo **jti** (`tokenId`), nhóm theo **family** (`familyId`); cột `revokedAt`, `rotatedTo` (audit), `expiresAt`.
+- **Rotation:** `/auth/refresh` thu hồi token đang dùng, phát token kế nhiệm trong cùng family.
+- **Reuse detection:** nếu nhận lại 1 token đã `revokedAt` → coi như token bị đánh cắp → thu hồi **cả family** + log warning.
+- **Logout thật:** `/auth/logout` thu hồi mọi refresh token active của user (log-out-everywhere). Access token vẫn sống tới hết TTL ngắn.
+- `signTokens` đọc `exp` ngược từ JWT đã ký để row DB và token luôn khớp hạn.
+- Spec mới: test rotation / reuse-detection / unknown-token / expired-row / deactivated-user / logout.
+
+### 4. Files thay đổi (git status)
+
+API: `schema.prisma`, `branch-scope.guard.ts`, `device-throttler.guard.ts`, `schedule.ts`, `trust-score.ts`, `env.validation.ts`, `attendance.service.ts`, `auth.{controller,service,service.spec}.ts`, `jwt.strategy.ts`, `employees.{controller,service}.ts`, `missing-checkout.processor.ts`, `report-export.processor.ts`, `reports.service.ts`, `zero-tap.{controller,service}.ts`.
+Mobile: `(tabs)/profile.tsx`, `checkin.tsx`.
+Portal: `package.json` (+`@microsoft/fetch-event-source`, +`qrcode.react`), `checkin/page.tsx`, `kiosk/[branchId]/page.tsx`, `live-feed.tsx`.
+
+### 5. Quyết định H1 (deferred)
+
+User chưa chắc topology portal↔API → thống nhất **hoãn H1 sang PR riêng**, kèm kế hoạch config-driven:
+- API: env `COOKIE_SAMESITE` / `COOKIE_SECURE` / `COOKIE_DOMAIN`; set/clear httpOnly cookie ở login/refresh/logout; jwt strategy thêm cookie extractor (vẫn giữ header path cho mobile); CORS `credentials:true` + allowlist nếu cross-origin; CSRF token nếu `SameSite=None`.
+- Portal: `ky` + `fetchEventSource` dùng `credentials:'include'`; bỏ đọc/ghi token vào `localStorage`.
+- Mobile: không đổi (native dùng `expo-secure-store`, không có XSS surface).
+
+### 6. Việc user phải tự chạy (chưa làm trong session — theo rule không động DB / không `pnpm install`)
+
+- `cd apps/api && pnpm prisma db push` — tạo bảng `refresh_tokens` + regenerate Prisma client. **`tsc` của API fail tới khi chạy** vì `prisma.refreshToken` chưa có trên client.
+- `pnpm install` — cho 2 dep portal mới.
+- Verify C4: `pnpm --filter @sa/api test auth.service`.
+
+### 7. Lessons
+
+- **Verify audit trước khi fix**: kiểm tra `.gitignore` + thư mục `migrations/` xác nhận dự án dùng `prisma db push` (không có migration file commit) → C4 chỉ sửa `schema.prisma`, không viết SQL migration.
+- **C12 vs H1 tương tác**: chuyển SSE sang Authorization header (C12) là đúng *bây giờ*; nhưng nếu H1 đẩy access token vào httpOnly cookie thì JS không đọc được header nữa → SSE phải quay về `credentials:'include'`. Cookie ≠ query string nên vẫn an toàn. Ghi chú để PR H1 không phá C12.
+- **Double-submit cần guard đồng bộ**: `setState` là async — 2 lần tap nhanh vẫn lọt. `useRef` set ngay trong cùng tick mới chặn được.
+- **C4 đánh đổi**: login giờ có thêm 1 DB write (`refreshToken.create`); DB ở chế độ read-only/degraded sẽ chặn login — đúng trade-off của việc persist refresh token.
+
+### 8. Follow-up
+
+- [ ] **H1** — PR riêng (xem mục 5).
+- [ ] `make docker-up` fail: `corepack prepare pnpm@10.33.0` báo `Cannot find matching keyid` trong Docker build (corepack trong image `node:20.18-alpine` có key cũ, không verify được signature của pnpm release mới). Fix: set `COREPACK_INTEGRITY_KEYS=0`, bump Node base image, hoặc cài pnpm qua `npm i -g`.
+- [ ] Cân nhắc bọc rotation C4 trong `$transaction` (hiện `create` + `update` là 2 write rời — cửa sổ lỗi nhỏ, advisor đã chấp nhận).
+
+---
+
 ## Session #022 — 2026-05-20 — Seed data 100 NV + fix AI insight stale + Docker hardening + bug `ai_insights_cache`
 
 ### Prompt gốc (theo thứ tự)
@@ -1983,4 +2071,3 @@ User chọn "Xóa sạch & seed lại": truncate toàn bộ bảng `public` trê
 - [ ] `upsert` của `ai_insights_cache` là SELECT-rồi-write, không nguyên tử `ON CONFLICT` — 2 request regenerate admin-scope song song vẫn có thể đua tới `P2002` (1 request 500). Sau `@Throttle` 60/h nên hiếm, chấp nhận được; có thể catch P2002 → đọc lại.
 - [ ] Root `.env` chứa secret thật (`GEMINI_API_KEY`, credential DB remote) — xác nhận đã gitignore trước khi commit.
 - [x] **Đăng nhập manager → 404 `/dashboard/manager/1e1b2aea…` + 403 `/ai/insights/weekly`.** Nguyên nhân: portal dùng 1 `QueryClient` cho cả vòng đời SPA, key `queryKeys.branches` không gắn user identity → list 5 chi nhánh cache lúc đăng nhập admin bị phục vụ lại cho manager → `managerBranches[0]` = chi nhánh ngoài scope. Backend đúng. Fix: gọi `queryClient.clear()` khi đăng nhập (`login/page.tsx`) và đăng xuất (`nav.tsx`) trước `router.replace`. Tab đang lỗi cần hard-refresh 1 lần.
-

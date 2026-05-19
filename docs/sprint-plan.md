@@ -366,6 +366,10 @@
 
 > Các session bảo trì sau khi đóng sprint. Chi tiết đầy đủ ở `PROMPT_LOG.md`.
 
+### Session #021 — 2026-05-19 — Security audit toàn codebase
+- [x] Fix 18/19 finding (C1–C15 + H2–H4); thêm model `RefreshToken` (revocation + rotation + reuse-detection).
+- [ ] **H1** — JWT trong `localStorage` portal → hoãn sang PR riêng (kế hoạch httpOnly cookie config-driven).
+
 ### Session #022 — 2026-05-20 — Seed data + fix AI insight + Docker hardening
 - [x] **Dữ liệu mẫu**: 5 chi nhánh, 1 manager/chi nhánh, **100 NV (20/chi nhánh)**, **90 ngày** lịch sử chấm công weekday (nâng từ 36 NV / 7 ngày). Reseed DB remote: 6400 phiên / 13153 event.
 - [x] **Bug seed date loop**: `workDate @db.Date` serialize theo UTC + loop kết thúc ở "hôm qua" → AI insight tuần hiện 0 phiên. Fix: anchor `Date.UTC(...)`, loop gồm cả hôm nay.

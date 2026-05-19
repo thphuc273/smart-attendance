@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { JwtRefreshPayload } from './strategies/jwt-refresh.strategy';
 
 @Injectable()
 export class AuthService {
@@ -46,10 +47,18 @@ export class AuthService {
 
     const roles = user.userRoles.map((ur) => ur.role.code);
     const managedBranchIds = user.managedBranches.map((mb) => mb.branchId);
-    const tokens = await this.signTokens(user.id, user.email, roles, managedBranchIds);
+    // A login starts a fresh token family.
+    const { access_token, refresh_token } = await this.signTokens(
+      user.id,
+      user.email,
+      roles,
+      managedBranchIds,
+      randomUUID(),
+    );
 
     return {
-      ...tokens,
+      access_token,
+      refresh_token,
       user: {
         id: user.id,
         email: user.email,
@@ -59,9 +68,40 @@ export class AuthService {
     };
   }
 
-  async refresh(sub: string) {
+  async refresh(payload: JwtRefreshPayload) {
+    const stored = await this.prisma.refreshToken.findUnique({
+      where: { tokenId: payload.tokenId },
+    });
+    // The token must exist, belong to the caller and not be expired. (The
+    // JWT signature + exp are already checked by the passport strategy; this
+    // is the server-side revocation state the JWT cannot carry.)
+    if (!stored || stored.userId !== payload.sub || stored.expiresAt < new Date()) {
+      throw new UnauthorizedException({
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Invalid refresh token',
+      });
+    }
+
+    // Reuse detection: an already-revoked token is being presented. It was
+    // either rotated or logged out — replaying it means the token leaked.
+    // Revoke the whole family so both the attacker's and the victim's
+    // refresh chains die, forcing a fresh login.
+    if (stored.revokedAt) {
+      await this.prisma.refreshToken.updateMany({
+        where: { familyId: stored.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      this.logger.warn(
+        `Refresh token reuse detected for user ${stored.userId}; family ${stored.familyId} revoked`,
+      );
+      throw new UnauthorizedException({
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Invalid refresh token',
+      });
+    }
+
     const user = await this.prisma.user.findUnique({
-      where: { id: sub },
+      where: { id: stored.userId },
       include: {
         userRoles: { include: { role: true } },
         managedBranches: { select: { branchId: true } },
@@ -73,9 +113,34 @@ export class AuthService {
         message: 'Invalid refresh token',
       });
     }
+
     const roles = user.userRoles.map((ur) => ur.role.code);
     const managedBranchIds = user.managedBranches.map((mb) => mb.branchId);
-    return this.signTokens(user.id, user.email, roles, managedBranchIds);
+    // Rotate within the same family.
+    const { access_token, refresh_token, tokenId } = await this.signTokens(
+      user.id,
+      user.email,
+      roles,
+      managedBranchIds,
+      stored.familyId,
+    );
+    // Retire the presented token and link it to its successor (audit trail).
+    await this.prisma.refreshToken.update({
+      where: { tokenId: stored.tokenId },
+      data: { revokedAt: new Date(), rotatedTo: tokenId },
+    });
+    return { access_token, refresh_token };
+  }
+
+  async logout(userId: string) {
+    // Log-out-everywhere: revoke every active refresh token for this user.
+    // Access tokens stay valid until they expire — they are short-lived by
+    // design, which is the trade-off for not maintaining an access-token
+    // denylist.
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 
   async getMe(userId: string) {
@@ -111,24 +176,38 @@ export class AuthService {
     };
   }
 
+  /**
+   * Signs an access + refresh token pair and persists the refresh token so
+   * it can later be rotated or revoked. `familyId` ties the token to a
+   * rotation chain. Returns `tokenId` (the new jti) so the caller can record
+   * a rotation link — callers must NOT leak it into the API response.
+   */
   private async signTokens(
     sub: string,
     email: string,
     roles: string[],
     managedBranchIds: string[],
-  ) {
+    familyId: string,
+  ): Promise<{ access_token: string; refresh_token: string; tokenId: string }> {
+    const tokenId = randomUUID();
     const accessPayload = { sub, email, roles, managed_branch_ids: managedBranchIds };
     const access_token = await this.jwt.signAsync(accessPayload, {
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       expiresIn: this.config.getOrThrow<string>('JWT_ACCESS_TTL'),
     });
     const refresh_token = await this.jwt.signAsync(
-      { sub, tokenId: randomUUID() },
+      { sub, tokenId },
       {
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.config.getOrThrow<string>('JWT_REFRESH_TTL'),
       },
     );
-    return { access_token, refresh_token };
+    // exp is read back from the signed JWT so the DB row and the token can
+    // never disagree about expiry.
+    const { exp } = this.jwt.decode(refresh_token) as { exp: number };
+    await this.prisma.refreshToken.create({
+      data: { userId: sub, tokenId, familyId, expiresAt: new Date(exp * 1000) },
+    });
+    return { access_token, refresh_token, tokenId };
   }
 }

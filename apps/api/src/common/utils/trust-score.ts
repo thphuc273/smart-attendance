@@ -36,6 +36,13 @@ export interface TrustScoreResult {
   trustLevel: TrustLevel;
 }
 
+/**
+ * Risk flag raised when the client reports a mock/spoofed GPS location.
+ * Exported so consumers (e.g. zero-tap eligibility) match the exact string
+ * instead of hard-coding a literal that can silently drift out of sync.
+ */
+export const MOCK_LOCATION_FLAG = 'mock_location_detected';
+
 export function calculateTrustScore(input: TrustScoreInput): TrustScoreResult {
   let score = 0;
   const flags: string[] = [];
@@ -69,7 +76,7 @@ export function calculateTrustScore(input: TrustScoreInput): TrustScoreResult {
   // ── Risk penalties ──
   if (input.isMockLocation) {
     score -= 50;
-    flags.push('mock_location_detected');
+    flags.push(MOCK_LOCATION_FLAG);
   }
 
   if (input.accuracyMeters !== null && input.accuracyMeters > 100) {

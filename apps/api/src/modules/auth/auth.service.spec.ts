@@ -19,6 +19,12 @@ type MockedPrisma = {
     findUniqueOrThrow: jest.Mock;
     update: jest.Mock;
   };
+  refreshToken: {
+    create: jest.Mock;
+    findUnique: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+  };
 };
 
 function makePrismaMock(): MockedPrisma {
@@ -28,6 +34,26 @@ function makePrismaMock(): MockedPrisma {
       findUniqueOrThrow: jest.fn(),
       update: jest.fn().mockResolvedValue(undefined),
     },
+    refreshToken: {
+      create: jest.fn().mockResolvedValue(undefined),
+      findUnique: jest.fn(),
+      update: jest.fn().mockResolvedValue(undefined),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+}
+
+/** A stored RefreshToken row as the rotation/reuse logic expects to find it. */
+function buildStoredToken(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'rt-1',
+    userId: 'user-uuid',
+    tokenId: 'token-id-1',
+    familyId: 'family-1',
+    revokedAt: null,
+    rotatedTo: null,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    ...overrides,
   };
 }
 
@@ -47,13 +73,17 @@ function buildUser(overrides: Partial<Record<string, unknown>> = {}) {
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: MockedPrisma;
-  let jwt: { signAsync: jest.Mock };
+  let jwt: { signAsync: jest.Mock; decode: jest.Mock };
   let config: { getOrThrow: jest.Mock };
 
   beforeEach(async () => {
     argon2Verify.mockReset();
     prisma = makePrismaMock();
-    jwt = { signAsync: jest.fn().mockImplementation((_p, opts) => Promise.resolve(`token-${opts.secret}`)) };
+    jwt = {
+      signAsync: jest.fn().mockImplementation((_p, opts) => Promise.resolve(`token-${opts.secret}`)),
+      // signTokens reads `exp` back off the signed refresh token.
+      decode: jest.fn().mockReturnValue({ exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 }),
+    };
     config = {
       getOrThrow: jest.fn().mockImplementation((key: string) => {
         const map: Record<string, string> = {
@@ -153,21 +183,78 @@ describe('AuthService', () => {
   // ─── refresh ────────────────────────────────────────────────
 
   describe('refresh', () => {
-    it('should reissue both tokens with fresh role + branch claims', async () => {
+    const presented = { sub: 'user-uuid', tokenId: 'token-id-1' };
+
+    it('should rotate tokens and retire the presented refresh token', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValueOnce(buildStoredToken());
       prisma.user.findUnique.mockResolvedValueOnce(buildUser());
 
-      const result = await service.refresh('user-uuid');
+      const result = await service.refresh(presented);
 
       expect(result).toEqual({ access_token: 'token-access-secret', refresh_token: 'token-refresh-secret' });
       expect(jwt.signAsync).toHaveBeenCalledTimes(2);
+      // The old token is revoked and linked to its successor.
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tokenId: 'token-id-1' },
+          data: expect.objectContaining({ revokedAt: expect.any(Date), rotatedTo: expect.any(String) }),
+        }),
+      );
+    });
+
+    it('should revoke the whole family when an already-revoked (reused) token is presented', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValueOnce(buildStoredToken({ revokedAt: new Date() }));
+
+      await expect(service.refresh(presented)).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'INVALID_REFRESH_TOKEN' },
+      });
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { familyId: 'family-1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('should reject an unknown refresh token', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValueOnce(null);
+
+      await expect(service.refresh(presented)).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'INVALID_REFRESH_TOKEN' },
+      });
+    });
+
+    it('should reject an expired refresh token row', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValueOnce(
+        buildStoredToken({ expiresAt: new Date(Date.now() - 1000) }),
+      );
+
+      await expect(service.refresh(presented)).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'INVALID_REFRESH_TOKEN' },
+      });
     });
 
     it('should reject when user has been deactivated after token was issued', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValueOnce(buildStoredToken());
       prisma.user.findUnique.mockResolvedValueOnce(buildUser({ status: 'inactive' }));
 
-      await expect(service.refresh('user-uuid')).rejects.toMatchObject({
+      await expect(service.refresh(presented)).rejects.toMatchObject({
         status: 401,
         response: { code: 'INVALID_REFRESH_TOKEN' },
+      });
+    });
+  });
+
+  // ─── logout ─────────────────────────────────────────────────
+
+  describe('logout', () => {
+    it('should revoke every active refresh token for the user', async () => {
+      await service.logout('user-uuid');
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-uuid', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
       });
     });
   });
