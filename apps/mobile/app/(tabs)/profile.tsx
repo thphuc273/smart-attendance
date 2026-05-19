@@ -96,6 +96,9 @@ export default function ProfileTab() {
   }, [device]);
 
   const logout = useCallback(async () => {
+    // Tear down the background geofence task first — it outlives the React
+    // tree and would keep firing check-in reminders for a logged-out user.
+    await disableGeofenceNotify();
     await clearAuth();
     router.replace('/login');
   }, [router]);

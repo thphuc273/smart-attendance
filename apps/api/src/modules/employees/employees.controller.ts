@@ -76,14 +76,15 @@ export class EmployeesController {
   createAssignment(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: CreateAssignmentDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.employees.createAssignment(id, dto);
+    return this.employees.createAssignment(id, dto, this.scopeOf(user));
   }
 
   @Get(':id/devices')
   @Roles(RoleCode.admin, RoleCode.manager)
-  listDevices(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.employees.listDevices(id);
+  listDevices(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.employees.listDevices(id, this.scopeOf(user));
   }
 
   @Patch(':id/devices/:deviceId')
@@ -92,7 +93,8 @@ export class EmployeesController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('deviceId', new ParseUUIDPipe()) deviceId: string,
     @Body() dto: ToggleDeviceTrustDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.employees.toggleDeviceTrust(id, deviceId, dto);
+    return this.employees.toggleDeviceTrust(id, deviceId, dto, this.scopeOf(user));
   }
 }

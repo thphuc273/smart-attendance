@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { AttendanceSessionStatus, DevicePlatform } from '@prisma/client';
+import { AttendanceSessionStatus, DevicePlatform, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CheckInDto, CheckOutDto } from './dto/check-in.dto';
 import {
@@ -206,6 +206,14 @@ export class AttendanceService {
     // 7. Validation: reject if both GPS and WiFi fail
     const validationPassed = gpsValid || bssidMatch || ssidOnlyMatch;
 
+    if (trustResult.flags.includes('mock_location_detected')) {
+      throw new UnprocessableEntityException({
+        code: 'MOCK_LOCATION_DETECTED',
+        message: 'Phát hiện vị trí giả mạo (Fake GPS)',
+        details: { risk_flags: trustResult.flags },
+      });
+    }
+
     // 8. Check for existing session today (VN calendar day)
     const workDate = todayInVN();
 
@@ -301,19 +309,40 @@ export class AttendanceService {
         },
       });
 
+      // Count successful manual check-ins per device — this drives
+      // zero-tap eligibility (minManualCheckinsToEnable).
+      if (validationPassed) {
+        await tx.employeeDevice.update({
+          where: { id: device.id },
+          data: { successfulCheckinCount: { increment: 1 } },
+        });
+      }
+
       return { sessionId, checkInAt, event };
+    }).catch((e) => {
+      // Two concurrent check-ins race past the existingSession guard and
+      // collide on @@unique([employeeId, workDate]). Translate the Prisma
+      // unique-violation into a clean 409 instead of a 500.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException({
+          code: 'ALREADY_CHECKED_IN',
+          message: 'Already checked in today — check-in time cannot be updated',
+        });
+      }
+      throw e;
     });
 
     // 11. If validation failed, throw (but event is already logged)
     if (!validationPassed) {
       const distanceValue = Number.isFinite(closestDistance) ? Math.round(closestDistance) : null;
+      // Return only branch identity to the employee. Exact geofence
+      // coordinates and radius are withheld — otherwise the error response
+      // can be used to reverse-engineer the geofence and spoof a location
+      // inside it. Admins see full geofence config via the branches API.
       const scannedBranches = branches.map((b) => ({
         id: b.id,
         code: b.code,
         name: b.name,
-        latitude: Number(b.latitude),
-        longitude: Number(b.longitude),
-        radius_meters: b.radiusMeters,
       }));
       let hint: string;
       if (branches.length === 0) {
@@ -322,9 +351,9 @@ export class AttendanceService {
       } else if (distanceValue === null) {
         hint = 'Không tính được khoảng cách — branch thiếu toạ độ hợp lệ.';
       } else if (distanceValue > 2000) {
-        hint = `GPS của bạn cách branch gần nhất ${distanceValue}m. Branch có thể đã lưu sai toạ độ. Yêu cầu admin kiểm tra lat/lng của ${scannedBranches[0]?.name}.`;
+        hint = `GPS của bạn cách branch gần nhất ${distanceValue}m. Branch có thể đã lưu sai toạ độ. Yêu cầu admin kiểm tra lại branch ${scannedBranches[0]?.name}.`;
       } else {
-        hint = `Bạn đang cách branch ${distanceValue}m (radius ${scannedBranches[0]?.radius_meters}m). Di chuyển gần hơn hoặc tăng radius.`;
+        hint = `Bạn đang cách khu vực chấm công khoảng ${distanceValue}m. Di chuyển gần hơn rồi thử lại.`;
       }
       throw new UnprocessableEntityException({
         code: 'INVALID_LOCATION',
@@ -560,10 +589,11 @@ export class AttendanceService {
           risk_flags: trustResult.flags,
           distance_meters: distanceValue,
           user_location: { latitude: dto.latitude, longitude: dto.longitude },
-          branch: branch ? { id: branch.id, name: branch.name, radius_meters: branch.radiusMeters } : null,
+          // Branch identity only — geofence radius is withheld (see check-in).
+          branch: branch ? { id: branch.id, name: branch.name } : null,
           hint:
             distanceValue !== null
-              ? `Bạn đang cách branch ${distanceValue}m (radius ${branch?.radiusMeters}m). Quay lại trong vùng branch để check-out.`
+              ? `Bạn đang cách khu vực chấm công khoảng ${distanceValue}m. Quay lại gần hơn để check-out.`
               : 'Không xác định được khoảng cách.',
         },
       });

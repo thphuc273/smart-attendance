@@ -18,7 +18,14 @@ export class BranchScopeGuard implements CanActivate {
     const branchId: string | undefined =
       req.params?.id ?? req.params?.branchId ?? req.body?.branch_id ?? req.query?.branch_id;
 
-    if (!branchId) return true; // Không có branch context → để service layer xử lý
+    // Fail-closed: a non-admin reaching a branch-scoped route with no
+    // resolvable branch context must be rejected, not waved through.
+    if (!branchId) {
+      throw new ForbiddenException({
+        code: 'BRANCH_CONTEXT_REQUIRED',
+        message: 'Branch context is required for this operation',
+      });
+    }
 
     if (!user.managedBranchIds.includes(branchId)) {
       throw new ForbiddenException({

@@ -2,17 +2,13 @@ import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotificationsService } from '../../notifications/notifications.service';
 import { QUEUE_MISSING_CHECKOUT } from '../../queue/queue.constants';
 
 @Processor(QUEUE_MISSING_CHECKOUT)
 export class MissingCheckoutProcessor extends WorkerHost {
   private readonly logger = new Logger(MissingCheckoutProcessor.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly notifications: NotificationsService,
-  ) {
+  constructor(private readonly prisma: PrismaService) {
     super();
   }
 
@@ -40,11 +36,6 @@ export class MissingCheckoutProcessor extends WorkerHost {
     }
 
     const ids = candidates.map((c) => c.id);
-    const result = await this.prisma.attendanceSession.updateMany({
-      where: { id: { in: ids } },
-      data: { status: 'missing_checkout' },
-    });
-
     const dateLabel = workDate.toISOString().slice(0, 10);
     const employeeNotis = candidates.map((c) => ({
       userId: c.employee.user.id,
@@ -72,12 +63,25 @@ export class MissingCheckoutProcessor extends WorkerHost {
       data: { branchId: m.branchId, workDate: dateLabel, count: countByBranch[m.branchId] },
     }));
 
-    const created = await this.notifications.createMany([...employeeNotis, ...managerNotis]);
+    // Close the sessions and emit notifications in a single transaction so
+    // a crash between the two cannot leave sessions closed with no notice.
+    // The candidate query excludes already-closed sessions, so a retried
+    // job is idempotent.
+    const { closed, notified } = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.attendanceSession.updateMany({
+        where: { id: { in: ids } },
+        data: { status: 'missing_checkout' },
+      });
+      const created = await tx.notification.createMany({
+        data: [...employeeNotis, ...managerNotis],
+      });
+      return { closed: result.count, notified: created.count };
+    });
 
     return {
       workDate: workDate.toISOString(),
-      closed: result.count,
-      notified: created.count,
+      closed,
+      notified,
     };
   }
 

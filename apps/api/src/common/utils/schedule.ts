@@ -30,11 +30,28 @@ export interface CheckOutClassification {
   lateMinutes: number;
 }
 
+/** Vietnam is UTC+7 (no DST). The API container runs UTC, so schedule
+ *  times must never be resolved via the server-local `Date` methods. */
+const VN_OFFSET_MS = 7 * 60 * 60_000;
+
+/**
+ * Resolve a 'HH:MM' schedule time to a UTC instant, anchored to the
+ * Vietnam (UTC+7) calendar date of `date`. Using `setHours` here would
+ * interpret HH:MM in the server timezone (UTC in containers), shifting
+ * every schedule boundary by 7 hours.
+ */
 function parseTimeOnDate(time: string, date: Date): Date {
   const [h, m] = time.split(':').map(Number);
-  const result = new Date(date);
-  result.setHours(h, m, 0, 0);
-  return result;
+  // Vietnam calendar date of the given instant, as YYYY-MM-DD.
+  const vnDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+  const [y, mo, d] = vnDate.split('-').map(Number);
+  // VN local HH:MM → UTC instant (subtract the +7h offset).
+  return new Date(Date.UTC(y, mo - 1, d, h, m) - VN_OFFSET_MS);
 }
 
 export function classifyCheckIn(checkInAt: Date, schedule: ScheduleConfig): CheckInClassification {
@@ -82,7 +99,13 @@ export function classifyCheckOut(
 }
 
 export function isWorkday(date: Date, schedule: ScheduleConfig): boolean {
-  const js = date.getDay();
-  const iso = js === 0 ? 7 : js;
-  return schedule.workdays.includes(iso);
+  // ISO weekday (Mon=1..Sun=7) in Vietnam time, not server-local time.
+  const vnWeekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    weekday: 'short',
+  }).format(date);
+  const iso: Record<string, number> = {
+    Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+  };
+  return schedule.workdays.includes(iso[vnWeekday]);
 }
