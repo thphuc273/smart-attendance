@@ -101,6 +101,6 @@ export class ZeroTapController {
     @Param('employeeId') employeeId: string,
     @Param('deviceId') deviceId: string,
   ) {
-    return this.service.revokeForDevice(employeeId, deviceId, 'admin_disabled', actor.id);
+    return this.service.revokeForDevice(employeeId, deviceId, 'admin_disabled', actor);
   }
 }

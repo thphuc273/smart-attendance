@@ -362,6 +362,16 @@
 
 ---
 
+## Post-sprint — Bảo trì & hardening (sau 6-day sprint)
+
+> Các session bảo trì sau khi đóng sprint. Chi tiết đầy đủ ở `PROMPT_LOG.md`.
+
+### Session #021 — 2026-05-19 — Security audit toàn codebase
+- [x] Fix 18/19 finding (C1–C15 + H2–H4); thêm model `RefreshToken` (revocation + rotation + reuse-detection).
+- [ ] **H1** — JWT trong `localStorage` portal → hoãn sang PR riêng (kế hoạch httpOnly cookie config-driven).
+
+---
+
 ## Cross-cutting — Daily ritual (mỗi ngày cuối)
 
 - [ ] `npm run lint` + `npm run test` xanh trước khi merge

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -154,8 +155,30 @@ export class ReportsService implements OnModuleInit {
     };
   }
 
+  /** Max span of a single CSV export — bounds the worker's memory use. */
+  private static readonly MAX_EXPORT_RANGE_DAYS = 366;
+
   async createExport(userId: string, isSuperAdmin: boolean, dto: CreateExportDto) {
     await this.assertBranchAccess(userId, isSuperAdmin, dto.branch_id);
+
+    const from = new Date(dto.date_from);
+    const to = new Date(dto.date_to);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_DATE_RANGE', message: 'Invalid date range' });
+    }
+    if (from.getTime() > to.getTime()) {
+      throw new BadRequestException({
+        code: 'INVALID_DATE_RANGE',
+        message: 'date_from must not be after date_to',
+      });
+    }
+    const rangeDays = (to.getTime() - from.getTime()) / 86_400_000;
+    if (rangeDays > ReportsService.MAX_EXPORT_RANGE_DAYS) {
+      throw new BadRequestException({
+        code: 'EXPORT_RANGE_TOO_LARGE',
+        message: `Export range cannot exceed ${ReportsService.MAX_EXPORT_RANGE_DAYS} days`,
+      });
+    }
 
     const record = await this.prisma.reportExport.create({
       data: {

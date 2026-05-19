@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsNumber, IsString, IsOptional, validateSync } from 'class-validator';
+import { IsEnum, IsNumber, IsString, IsOptional, MinLength, validateSync } from 'class-validator';
 
 enum NodeEnv {
   Development = 'development',
@@ -29,13 +29,17 @@ class EnvSchema {
   @IsOptional()
   REDIS_PORT?: number;
 
+  // Secrets must carry enough entropy to resist offline brute-force of
+  // signed tokens — reject anything shorter than 32 chars at boot.
   @IsString()
+  @MinLength(32)
   JWT_ACCESS_SECRET!: string;
 
   @IsString()
   JWT_ACCESS_TTL!: string;
 
   @IsString()
+  @MinLength(32)
   JWT_REFRESH_SECRET!: string;
 
   @IsString()

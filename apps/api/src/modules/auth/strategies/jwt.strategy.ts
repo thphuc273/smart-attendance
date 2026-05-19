@@ -15,12 +15,10 @@ export interface JwtAccessPayload {
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
-        // SSE fallback — EventSource cannot set custom headers, so clients
-        // pass the access token via ?access_token=... on SSE endpoints only.
-        ExtractJwt.fromUrlQueryParameter('access_token'),
-      ]),
+      // Authorization header only. SSE clients use a header-capable fetch
+      // stream, so the access token is never accepted from the query string
+      // (where it would leak to access logs, history and the Referer header).
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });

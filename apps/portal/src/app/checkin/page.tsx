@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TopNav } from '../../components/nav';
 import { useRequireAuth } from '../../lib/auth';
 import { getApi } from '../../lib/api';
@@ -74,6 +74,10 @@ export default function CheckinPage() {
   const qc = useQueryClient();
   const [submitting, setSubmitting] = useState<'in' | 'out' | null>(null);
   const [now, setNow] = useState(() => new Date());
+  // Synchronous re-entry guard: the `submitting` state (and the button's
+  // disabled prop) only updates on the next render, so a rapid double-click
+  // can fire two requests in the same tick. A ref flips immediately.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -95,7 +99,8 @@ export default function CheckinPage() {
   const refreshHistory = () => qc.invalidateQueries({ queryKey: ['sessions', 'me'] });
 
   const doCheck = async (kind: 'in' | 'out') => {
-    if (!user) return;
+    if (!user || inFlight.current) return;
+    inFlight.current = true;
     setSubmitting(kind);
     setMessage(null);
     setLastResult(null);
@@ -167,6 +172,7 @@ export default function CheckinPage() {
       setMessage({ kind: 'err', text });
       setErrorDebug(debug);
     } finally {
+      inFlight.current = false;
       setSubmitting(null);
     }
   };

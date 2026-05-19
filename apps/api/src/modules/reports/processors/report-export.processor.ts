@@ -27,6 +27,20 @@ const CSV_COLUMNS = [
   'trust_score',
 ];
 
+/** Hard cap on rows pulled into memory for one export — OOM backstop. */
+const MAX_EXPORT_ROWS = 100_000;
+
+/**
+ * Neutralise CSV/spreadsheet formula injection. A cell whose text begins
+ * with = + - @ (or a leading tab/CR) is executed as a formula by Excel and
+ * Google Sheets; prefixing with an apostrophe forces it to render as
+ * literal text.
+ */
+function sanitizeCsvCell(value: string | number): string | number {
+  if (typeof value !== 'string') return value;
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 @Processor(QUEUE_REPORT_EXPORT)
 export class ReportExportProcessor extends WorkerHost {
   private readonly logger = new Logger(ReportExportProcessor.name);
@@ -63,21 +77,24 @@ export class ReportExportProcessor extends WorkerHost {
           },
         },
         orderBy: [{ workDate: 'asc' }, { employeeId: 'asc' }],
+        take: MAX_EXPORT_ROWS,
       });
 
-      const rows = sessions.map((s) => [
-        s.workDate.toISOString().slice(0, 10),
-        s.employee.employeeCode,
-        s.employee.user.fullName,
-        s.branch.name,
-        s.status,
-        s.checkInAt?.toISOString() ?? '',
-        s.checkOutAt?.toISOString() ?? '',
-        s.workedMinutes ?? 0,
-        s.overtimeMinutes ?? 0,
-        s.lateMinutes ?? 0,
-        s.trustScore ?? '',
-      ]);
+      const rows = sessions.map((s) =>
+        [
+          s.workDate.toISOString().slice(0, 10),
+          s.employee.employeeCode,
+          s.employee.user.fullName,
+          s.branch.name,
+          s.status,
+          s.checkInAt?.toISOString() ?? '',
+          s.checkOutAt?.toISOString() ?? '',
+          s.workedMinutes ?? 0,
+          s.overtimeMinutes ?? 0,
+          s.lateMinutes ?? 0,
+          s.trustScore ?? '',
+        ].map(sanitizeCsvCell),
+      );
 
       const csv = stringify([CSV_COLUMNS, ...rows], { bom: true });
       const fileName = `attendance_${branch_id}_${date_from}_${date_to}.csv`;

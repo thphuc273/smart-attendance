@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { QRCodeSVG } from 'qrcode.react';
 import { getApi } from '../../../lib/api';
 
 interface QrTokenData {
@@ -133,10 +134,6 @@ export default function KioskPage() {
     );
   }
 
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-    tokenData.token,
-  )}`;
-
   const refreshWindow = tokenData.refresh_every_seconds || 25;
   const radius = 190;
   const circumference = 2 * Math.PI * radius;
@@ -201,13 +198,16 @@ export default function KioskPage() {
             className="transition-all duration-1000 ease-linear drop-shadow-[0_0_12px_rgba(99,102,241,0.6)]"
           />
         </svg>
-        {/* QR card */}
+        {/* QR card — rendered client-side so the rotating kiosk token never
+            leaves the browser to a third-party QR image service. */}
         <div className="relative rounded-3xl bg-white p-6 shadow-[0_20px_60px_-10px_rgba(99,102,241,0.5)] ring-1 ring-white/10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={qrUrl}
-            alt="Check-in QR Code"
-            className="h-[300px] w-[300px] object-contain transition-opacity duration-300"
+          <QRCodeSVG
+            value={tokenData.token}
+            size={300}
+            level="M"
+            marginSize={0}
+            aria-label="Check-in QR Code"
+            className="h-[300px] w-[300px] transition-opacity duration-300"
           />
         </div>
       </div>

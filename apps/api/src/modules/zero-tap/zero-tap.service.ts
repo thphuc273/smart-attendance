@@ -13,6 +13,7 @@ import { RoleCode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceService } from '../attendance/attendance.service';
 import { checkZeroTapEligibility } from '../../common/utils/zero-tap-guard';
+import { MOCK_LOCATION_FLAG } from '../../common/utils/trust-score';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import {
   JOB_ZERO_TAP_REVOKE_CLEANUP_CRON,
@@ -209,11 +210,20 @@ export class ZeroTapService implements OnModuleInit {
       | 'attestation_failed'
       | 'mock_location_detected'
       | 'branch_disabled' = 'admin_disabled',
-    actorId?: string,
+    actor?: AuthenticatedUser,
   ) {
-    const device = await this.prisma.employeeDevice.findUnique({ where: { id: deviceId } });
+    const device = await this.prisma.employeeDevice.findUnique({
+      where: { id: deviceId },
+      include: { employee: { select: { primaryBranchId: true } } },
+    });
     if (!device || device.employeeId !== employeeId) {
       throw new NotFoundException('Device not found for employee');
+    }
+    // Manager-initiated revocation must stay within the manager's branch
+    // scope. System-initiated calls (attestation/mock-location) pass no
+    // actor and skip this check.
+    if (actor) {
+      await this.assertManagerScope(actor, device.employee.primaryBranchId);
     }
     const updated = await this.prisma.employeeDevice.update({
       where: { id: deviceId },
@@ -223,10 +233,10 @@ export class ZeroTapService implements OnModuleInit {
         zeroTapRevokeReason: reason,
       },
     });
-    if (actorId) {
+    if (actor) {
       await this.prisma.auditLog.create({
         data: {
-          userId: actorId,
+          userId: actor.id,
           action: 'update',
           entityType: 'EmployeeDevice.zeroTap',
           entityId: deviceId,
@@ -332,7 +342,7 @@ export class ZeroTapService implements OnModuleInit {
     // Security: if mock location detected during zero-tap, auto-revoke consent.
     // BullMQ cron will re-enable after 7 days (spec §6 layer 4).
     const flags = (result.risk_flags ?? []) as string[];
-    if (dto.is_mock_location || flags.includes('mock_location')) {
+    if (dto.is_mock_location || flags.includes(MOCK_LOCATION_FLAG)) {
       await this.revokeForDevice(employee.id, device.id, 'mock_location_detected');
     }
     if (!attestationOk) {
