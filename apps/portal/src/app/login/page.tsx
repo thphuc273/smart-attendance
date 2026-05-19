@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import ky from 'ky';
+import { useQueryClient } from '@tanstack/react-query';
 import { storeAuth } from '../../lib/api';
 import { homeFor } from '../../lib/auth';
 
@@ -28,6 +29,7 @@ interface LoginResponse {
 
 export default function LoginPage() {
   const router = useRouter();
+  const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const { register, handleSubmit, formState } = useForm<Form>({
     resolver: zodResolver(schema),
@@ -41,6 +43,10 @@ export default function LoginPage() {
         .post(`${API_BASE_URL}/auth/login`, { json: form })
         .json<LoginResponse>();
       storeAuth(res.data.access_token, res.data.user);
+      // Drop any cached queries from a previous session — keys like
+      // ['branches', …] aren't user-scoped, so a stale admin response could
+      // otherwise leak into a manager session (wrong branch → 404/403).
+      qc.clear();
       router.replace(homeFor(res.data.user));
     } catch (e) {
       setError((e as Error).message);
