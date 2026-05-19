@@ -7,7 +7,7 @@ ARG NODE_VERSION=20.18-alpine
 
 # ───── 1) Deps: install all workspace deps ─────
 FROM node:${NODE_VERSION} AS deps
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@10.33.0 --activate
 WORKDIR /workspace
 
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json .npmrc ./
@@ -18,7 +18,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 
 # ───── 2) Build ─────
 FROM node:${NODE_VERSION} AS build
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@10.33.0 --activate
 WORKDIR /workspace
 
 COPY --from=deps /workspace/node_modules ./node_modules

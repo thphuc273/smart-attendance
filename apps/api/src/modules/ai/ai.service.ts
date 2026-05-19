@@ -12,6 +12,11 @@ import { toolsForScope, ToolScope } from './tools/tool-definitions';
 const INSIGHT_TTL_MS = 60 * 60 * 1000;
 const MAX_TOOL_ITERATIONS = 6;
 
+// Nil-UUID sentinel for the admin (system-wide) cache scope. The cache table's
+// scopeId column is non-nullable so the (scope, scopeId, weekStart) unique key
+// holds; admin rows have no real branch id, so they key on this sentinel.
+const ADMIN_SCOPE_ID = '00000000-0000-0000-0000-000000000000';
+
 function mondayUtc(date: Date): Date {
   const vnMs = date.getTime() + 7 * 3600 * 1000;
   const vn = new Date(vnMs);
@@ -72,9 +77,13 @@ export class AiService {
     const weekStart = weekStartInput ? new Date(weekStartInput + 'T00:00:00Z') : mondayUtc(new Date());
     const weekEnd = addDays(weekStart, 6);
 
-    const cached = await this.prisma.aiInsightCache.findFirst({
-      where: { scope, scopeId, weekStart },
-    });
+    // scopeId stays null in the API response for admin scope; the cache row
+    // keys on the nil-UUID sentinel instead (column is non-nullable).
+    const cacheKey = {
+      scope_scopeId_weekStart: { scope, scopeId: scopeId ?? ADMIN_SCOPE_ID, weekStart },
+    };
+
+    const cached = await this.prisma.aiInsightCache.findUnique({ where: cacheKey });
     if (cached && cached.expiresAt > new Date()) {
       return {
         cached: true,
@@ -100,16 +109,17 @@ export class AiService {
     }
 
     const expiresAt = new Date(Date.now() + INSIGHT_TTL_MS);
-    if (cached) {
-      await this.prisma.aiInsightCache.update({
-        where: { id: cached.id },
-        data: { payload: payload as never, generatedAt: new Date(), expiresAt },
-      });
-    } else {
-      await this.prisma.aiInsightCache.create({
-        data: { scope, scopeId, weekStart, payload: payload as never, expiresAt },
-      });
-    }
+    await this.prisma.aiInsightCache.upsert({
+      where: cacheKey,
+      create: {
+        scope,
+        scopeId: scopeId ?? ADMIN_SCOPE_ID,
+        weekStart,
+        payload: payload as never,
+        expiresAt,
+      },
+      update: { payload: payload as never, generatedAt: new Date(), expiresAt },
+    });
 
     return {
       cached: false,

@@ -7,7 +7,7 @@ ARG NODE_VERSION=20.18-alpine
 
 # ───── 1) Deps: install all workspace deps ─────
 FROM node:${NODE_VERSION} AS deps
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@10.33.0 --activate
 WORKDIR /workspace
 
 # Manifests only first for maximal cache reuse
@@ -19,7 +19,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 
 # ───── 2) Build ─────
 FROM node:${NODE_VERSION} AS build
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@10.33.0 --activate
 WORKDIR /workspace
 
 # Bring in deps + source. Copying full /workspace avoids guessing which
@@ -36,19 +36,27 @@ RUN pnpm build
 
 # ───── 3) Runtime ─────
 FROM node:${NODE_VERSION} AS runtime
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
-WORKDIR /app
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 ENV NODE_ENV=production
 
-# Runtime needs: compiled dist, prisma schema + CLI + client, package.json
-COPY --from=build /workspace/apps/api/package.json ./package.json
-COPY --from=build /workspace/apps/api/dist ./dist
-COPY --from=build /workspace/apps/api/prisma ./prisma
-COPY --from=build /workspace/apps/api/node_modules ./node_modules
+# pnpm workspace + `shamefully-hoist=true`: deps are hoisted into the root
+# /workspace/node_modules, and apps/api/node_modules holds relative symlinks
+# (../../node_modules/.pnpm/...) into it. The /workspace layout must be kept
+# intact for those symlinks — and the prisma/ts-node CLIs — to resolve.
+COPY --from=build /workspace/node_modules /workspace/node_modules
+COPY --from=build /workspace/apps/api/package.json   /workspace/apps/api/package.json
+COPY --from=build /workspace/apps/api/tsconfig.json  /workspace/apps/api/tsconfig.json
+COPY --from=build /workspace/apps/api/node_modules   /workspace/apps/api/node_modules
+COPY --from=build /workspace/apps/api/prisma         /workspace/apps/api/prisma
+COPY --from=build /workspace/apps/api/dist           /workspace/apps/api/dist
+
+WORKDIR /workspace/apps/api
 
 EXPOSE 3000
 
-# Entrypoint: migrate (idempotent) → seed (upsert-based) → start
-# If migrate fails the container exits — visible in compose logs.
-CMD ["sh", "-c", "pnpm prisma migrate deploy && pnpm prisma:seed && node dist/main.js"]
+# Entrypoint: sync schema → seed (upsert-based) → start.
+# Project has no prisma/migrations — schema is kept in sync via `db push`
+# (idempotent). `--skip-generate`: client is already generated at build time.
+# If db push fails the container exits — visible in compose logs.
+CMD ["sh", "-c", "pnpm prisma db push --skip-generate && pnpm prisma:seed && node dist/main.js"]

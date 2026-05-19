@@ -1999,3 +1999,75 @@ User chưa chắc topology portal↔API → thống nhất **hoãn H1 sang PR ri
 - [ ] Cân nhắc bọc rotation C4 trong `$transaction` (hiện `create` + `update` là 2 write rời — cửa sổ lỗi nhỏ, advisor đã chấp nhận).
 
 ---
+
+## Session #022 — 2026-05-20 — Seed data 100 NV + fix AI insight stale + Docker hardening + bug `ai_insights_cache`
+
+### Prompt gốc (theo thứ tự)
+
+1. "Fix `make docker-up`" — corepack báo lỗi signature khi build Docker.
+2. "Tạo thêm dữ liệu mẫu: manager cho mọi chi nhánh, thêm chi nhánh, thêm nhân viên, 90 ngày lịch sử chấm công" (không thêm tài khoản admin).
+3. "data vẫn là 36 nhân viên, kiểm tra lại dữ liệu mẫu".
+4. "AI insight vẫn là dữ liệu cũ" (insight tuần hiện 0 phiên / 37 nhân sự, "từ cache").
+5. "rebuild Docker API image và xử lý bug nullable-scopeId".
+6. "review lại 1 lần nữa xem có bug trên code mới hay không, sau đó cập nhật prompt log và sprint".
+
+### 1. Bối cảnh
+
+Công việc bảo trì sau sprint, nối tiếp Session #021 (security audit). Trọng tâm: làm giàu dữ liệu mẫu để demo và sửa các bug lộ ra khi dữ liệu mới không hiển thị đúng trên app.
+
+**Phát hiện quan trọng — 2 database tách biệt:**
+- API dev chạy local kết nối **Postgres remote do Prisma host** (`db.prisma.io`, lấy từ root `.env`).
+- Stack Docker dùng **Postgres riêng trong Docker** (compose override `DATABASE_URL`).
+→ Triệu chứng "vẫn 36 nhân viên": seed mới chỉ chạy vào Docker Postgres, app lại đọc DB remote.
+
+### 2. Danh sách thay đổi & cách fix
+
+| # | Vấn đề | Cách fix | File |
+|---|---|---|---|
+| S1 | `make docker-up` fail: corepack `Cannot find matching keyid` (key ký cũ trong `node:20.18-alpine` không verify được pnpm release mới) | Prepend `npm install -g corepack@latest` ở mọi stage | `apps/api/Dockerfile`, `apps/portal/Dockerfile` |
+| S2 | Runtime CMD dùng `prisma migrate deploy` nhưng dự án không có `prisma/migrations/` | Đổi sang `prisma db push --skip-generate`; giữ nguyên layout `/workspace` ở runtime stage cho symlink pnpm `shamefully-hoist` + CLI prisma/ts-node resolve được | `apps/api/Dockerfile` |
+| S3 | Compose API service set `REDIS_URL` nhưng `env.validation.ts` cần `REDIS_HOST`/`REDIS_PORT` | Đổi env key | `docker-compose.yml` |
+| S4 | Dữ liệu mẫu mỏng (36 NV, 7 ngày) | Viết lại seed: 5 chi nhánh, 1 manager/chi nhánh, **100 NV (20/chi nhánh)**, **90 ngày** lịch sử chấm công weekday. Idempotent: upsert branch/user/employee, `createMany` chunk 1000 cho attendance + `seenKeys` Set | `apps/api/prisma/seed.ts` |
+| S5 | Seed date loop sai → AI insight 0 phiên | (a) Ngày anchor theo **local** midnight, cột `workDate @db.Date` serialize theo **UTC** → trên máy UTC+7 `workDate` lệch sớm 1 ngày. (b) Loop kết thúc ở "hôm qua" → tuần hiện tại không có phiên nào. Fix: anchor `Date.UTC(...)`, loop `d = DAYS-1 … 0` (gồm cả hôm nay) | `apps/api/prisma/seed.ts` |
+| S6 | Login 500: `table public.refresh_tokens does not exist` | Model `RefreshToken` (#021) chưa `db push` lên DB remote. Chạy `prisma db push` lên remote `DATABASE_URL` (thay đổi thuần additive → an toàn). Regenerate Prisma client (sửa `TS2339 prisma.refreshToken`) | — (DB remote) |
+| S7 | `ai_insights_cache.scopeId` nullable → `@@unique` không chặn được trùng | `scopeId` non-nullable + default nil-UUID; admin scope key bằng sentinel. `findFirst`+`create`/`update` → `findUnique(compound key)` + `upsert` | `schema.prisma`, `ai.service.ts` |
+
+### 3. Chi tiết S7 — Bug nullable-`scopeId` (advisor flag)
+
+`AiInsightCache` có `scopeId String?` + `@@unique([scope, scopeId, weekStart])`. Với insight scope `admin`, `scopeId = NULL`. Postgres coi mỗi `NULL` là **khác nhau** dưới ràng buộc `UNIQUE` → constraint không bao giờ chặn được dòng admin trùng. Code `getWeeklyInsights` dùng `findFirst` nên vẫn đọc được, nhưng 2 request regenerate admin-scope chạy song song có thể tạo nhiều dòng cache trùng tích tụ dần.
+
+**Fix:**
+- `scopeId String @default("00000000-0000-0000-0000-000000000000")` — non-nullable, admin scope dùng nil-UUID sentinel → `@@unique` thực sự hiệu lực.
+- `ai.service.ts`: hằng `ADMIN_SCOPE_ID`; `cacheKey = { scope_scopeId_weekStart: { scope, scopeId: scopeId ?? ADMIN_SCOPE_ID, weekStart } }`; đọc bằng `findUnique`, ghi bằng `upsert`.
+- Response API giữ `scope_id: null` cho admin (biến `scopeId` nullable không đổi) → không phá API contract.
+- DB remote: bảng trống sau truncate nên `db push` chuyển cột sang `NOT NULL` an toàn.
+
+### 4. Reseed DB remote
+
+User chọn "Xóa sạch & seed lại": truncate toàn bộ bảng `public` trên DB remote → `pnpm prisma:seed`. Kết quả: 100 NV, **6400 phiên / 13153 event** trên 90 ngày, `max(work_date)=2026-05-19`, 200 phiên trong tuần hiện tại. `ai_insights_cache` về 0 dòng → lần fetch insight kế tiếp regenerate trên dữ liệu mới.
+
+### 5. Files thay đổi
+
+`apps/api/Dockerfile`, `apps/portal/Dockerfile`, `docker-compose.yml`, `apps/api/prisma/seed.ts`, `apps/api/prisma/schema.prisma` (model `AiInsightCache`), `apps/api/src/modules/ai/ai.service.ts`. Docker image `smart-attendance-api:latest` đã rebuild.
+
+### 6. Verify
+
+- `tsc --noEmit` API: clean (xác nhận tên compound key `scope_scopeId_weekStart` đúng).
+- `ai.service.spec.ts`: 5/5 pass.
+- DB remote: cột `scope_id` = `NOT NULL` default `00000000-…-0000`; `ai_insights_cache` = 0 dòng.
+- Seed: `max(work_date)=2026-05-19`, 200 phiên tuần 18–24/05.
+
+### 7. Lessons
+
+- **Bẫy 2-database**: thay đổi seed/schema verify trên Docker DB là vô hình với dev server trỏ vào DB remote khác. Luôn xác nhận process đang chạy dùng `DATABASE_URL` nào.
+- **`@db.Date` serialize theo UTC**: dựng ngày bằng `setHours`/local-midnight trên máy không-UTC sẽ lệch ngày lưu. Anchor bằng `Date.UTC(...)`.
+- **NULL là distinct dưới `UNIQUE`**: cột nullable trong composite unique key vô hiệu hoá dedup cho nhánh NULL. Dùng sentinel + non-nullable (hoặc partial index).
+- **`prisma db push` theo từng DB**: thay đổi schema additive (`RefreshToken` của #021) không tự tới DB remote — phải push riêng cho từng target.
+- **corepack signature fail** ở Node Alpine cũ → `npm install -g corepack@latest`.
+
+### 8. Follow-up
+
+- [ ] Volume Docker Postgres vẫn giữ seed CŨ (`workDate` lệch). Muốn chạy `sa-api` sạch: `docker compose down -v` để xoá volume → container rebuild tự seed lại đúng.
+- [ ] `upsert` của `ai_insights_cache` là SELECT-rồi-write, không nguyên tử `ON CONFLICT` — 2 request regenerate admin-scope song song vẫn có thể đua tới `P2002` (1 request 500). Sau `@Throttle` 60/h nên hiếm, chấp nhận được; có thể catch P2002 → đọc lại.
+- [ ] Root `.env` chứa secret thật (`GEMINI_API_KEY`, credential DB remote) — xác nhận đã gitignore trước khi commit.
+- [x] **Đăng nhập manager → 404 `/dashboard/manager/1e1b2aea…` + 403 `/ai/insights/weekly`.** Nguyên nhân: portal dùng 1 `QueryClient` cho cả vòng đời SPA, key `queryKeys.branches` không gắn user identity → list 5 chi nhánh cache lúc đăng nhập admin bị phục vụ lại cho manager → `managerBranches[0]` = chi nhánh ngoài scope. Backend đúng. Fix: gọi `queryClient.clear()` khi đăng nhập (`login/page.tsx`) và đăng xuất (`nav.tsx`) trước `router.replace`. Tab đang lỗi cần hard-refresh 1 lần.
