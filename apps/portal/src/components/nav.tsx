@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { clearAuth, getStoredUser, isAdmin, isManager, type ApiUser } from '../lib/api';
 import { NotificationBell } from './notification-bell';
 import { ChatWidget } from './chat-widget';
@@ -29,6 +30,7 @@ const NAV_ITEMS: { href: string; label: string; icon: string; role?: Role }[] = 
  */
 export function TopNav({ children }: { children?: React.ReactNode }) {
   const router = useRouter();
+  const qc = useQueryClient();
   const pathname = usePathname();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -43,6 +45,7 @@ export function TopNav({ children }: { children?: React.ReactNode }) {
 
   const logout = () => {
     clearAuth();
+    qc.clear(); // wipe cached queries so the next user can't see this session's data
     router.replace('/login');
   };
 
