@@ -238,11 +238,19 @@ export class EmployeesService {
     return this.getById(employeeId);
   }
 
-  async createAssignment(employeeId: string, dto: CreateAssignmentDto) {
+  async createAssignment(
+    employeeId: string,
+    dto: CreateAssignmentDto,
+    scopedBranchIds?: string[],
+  ) {
     const emp = await this.prisma.employee.findUnique({ where: { id: employeeId } });
     if (!emp) {
       throw new NotFoundException({ code: 'RESOURCE_NOT_FOUND', message: 'Employee not found' });
     }
+    // Manager must manage both the employee's home branch and the branch
+    // they are being assigned to.
+    this.assertBranchScope(emp.primaryBranchId, scopedBranchIds);
+    this.assertBranchScope(dto.branch_id, scopedBranchIds);
 
     return this.prisma.employeeBranchAssignment.create({
       data: {
@@ -255,11 +263,12 @@ export class EmployeesService {
     });
   }
 
-  async listDevices(employeeId: string) {
+  async listDevices(employeeId: string, scopedBranchIds?: string[]) {
     const emp = await this.prisma.employee.findUnique({ where: { id: employeeId } });
     if (!emp) {
       throw new NotFoundException({ code: 'RESOURCE_NOT_FOUND', message: 'Employee not found' });
     }
+    this.assertBranchScope(emp.primaryBranchId, scopedBranchIds);
 
     const devices = await this.prisma.employeeDevice.findMany({
       where: { employeeId },
@@ -275,7 +284,18 @@ export class EmployeesService {
     }));
   }
 
-  async toggleDeviceTrust(employeeId: string, deviceId: string, dto: ToggleDeviceTrustDto) {
+  async toggleDeviceTrust(
+    employeeId: string,
+    deviceId: string,
+    dto: ToggleDeviceTrustDto,
+    scopedBranchIds?: string[],
+  ) {
+    const emp = await this.prisma.employee.findUnique({ where: { id: employeeId } });
+    if (!emp) {
+      throw new NotFoundException({ code: 'RESOURCE_NOT_FOUND', message: 'Employee not found' });
+    }
+    this.assertBranchScope(emp.primaryBranchId, scopedBranchIds);
+
     const device = await this.prisma.employeeDevice.findFirst({
       where: { id: deviceId, employeeId },
     });

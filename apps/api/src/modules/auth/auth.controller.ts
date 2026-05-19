@@ -27,14 +27,16 @@ export class AuthController {
   @UseGuards(JwtRefreshGuard)
   refresh(@Body() _dto: RefreshDto, @Req() req: Request) {
     const payload = req.user as JwtRefreshPayload;
-    return this.auth.refresh(payload.sub);
+    return this.auth.refresh(payload);
   }
 
   @Post('logout')
   @HttpCode(204)
   @UseGuards(JwtAuthGuard)
-  logout(): void {
-    // MVP: stateless JWT; refresh token revocation list = Day 4 enhancement.
+  async logout(@CurrentUser() user: AuthenticatedUser): Promise<void> {
+    // Revoke every refresh token for this user so a stolen/cached refresh
+    // token cannot be redeemed after logout.
+    await this.auth.logout(user.id);
   }
 
   @Get('me')

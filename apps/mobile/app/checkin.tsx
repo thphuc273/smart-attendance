@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -70,6 +70,10 @@ export default function CheckinScreen() {
   const [now, setNow] = useState(() => new Date());
   const [streak, setStreak] = useState<Streak | null>(null);
   const [setting, setSetting] = useState<ZeroTapSetting | null>(null);
+  // Synchronous re-entry guard: `submitting` state updates on the next
+  // render, so a double-tap in the same tick can fire two requests before
+  // the disabled prop takes effect. A ref flips immediately.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -126,6 +130,8 @@ export default function CheckinScreen() {
   );
 
   const doCheck = async (kind: 'in' | 'out') => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSubmitting(kind);
     setMessage(null);
     try {
@@ -178,6 +184,7 @@ export default function CheckinScreen() {
       Alert.alert('Chấm công thất bại', text);
       setMessage({ kind: 'err', text });
     } finally {
+      inFlight.current = false;
       setSubmitting(null);
     }
   };
